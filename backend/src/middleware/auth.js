@@ -1,22 +1,35 @@
-const jwt = require("jsonwebtoken");
+const supabase = require("../lib/supabase");
 
-function authMiddleware(req, res, next) {
+async function requireAuth(req, res, next) {
   try {
-    const authHeader = req.headers.authorization;
+    const authHeader = req.headers.authorization || "";
+    console.log("AUTH HEADER:", authHeader);
 
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return res.status(401).json({ ok: false, error: "Unauthorized" });
+    if (!authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Missing token" });
     }
 
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const token = authHeader.replace("Bearer ", "").trim();
+    console.log("AUTH TOKEN:", token);
 
-    req.user = decoded;
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+
+    console.log("AUTH USER:", user);
+    console.log("AUTH ERROR:", error);
+
+    if (error || !user) {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+
+    req.user = user;
     next();
-  } catch (error) {
-    console.error("Auth error:", error);
-    return res.status(401).json({ ok: false, error: "Invalid token" });
+  } catch (err) {
+    console.error("Auth error:", err);
+    res.status(500).json({ error: "Auth failed" });
   }
 }
 
-module.exports = authMiddleware;
+module.exports = requireAuth;

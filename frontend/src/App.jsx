@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
+import SignupPage from "./pages/SignupPage";
 import DashboardPage from "./pages/DashboardPage";
 import CustomersPage from "./pages/CustomersPage";
 import JobsPage from "./pages/JobsPage";
@@ -7,22 +8,26 @@ import CleanersPage from "./pages/CleanersPage";
 import JobDetailPage from "./pages/JobDetailPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import SchedulePage from "./pages/SchedulePage";
+import LandingPage from "./pages/LandingPage";
+import { useAuth } from "./context/AuthContext";
 
 function PrivateRoute({ children }) {
-  const token = localStorage.getItem("token");
-  return token ? children : <Navigate to="/login" replace />;
+  const { session, loading } = useAuth();
+
+  if (loading) {
+    return <div className="p-6">Checking session...</div>;
+  }
+
+  return session ? children : <Navigate to="/login" replace />;
 }
 
 export default function App() {
-  const token = localStorage.getItem("token");
-
   return (
     <Routes>
-      <Route
-        path="/"
-        element={<Navigate to={token ? "/dashboard" : "/login"} replace />}
-      />
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
+
       <Route
         path="/dashboard"
         element={

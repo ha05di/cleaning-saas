@@ -1,10 +1,21 @@
 import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
+import { supabase } from "../lib/supabase";
 
 export default function AppLayout({ title, children }) {
   const navigate = useNavigate();
-  const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const { user } = useAuth();
 
-  function handleLogout() {
+  const displayName =
+    user?.user_metadata?.full_name ||
+    user?.email ||
+    "User";
+
+  const companyName =
+    user?.user_metadata?.business_name || "";
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     navigate("/login");
@@ -27,8 +38,10 @@ export default function AppLayout({ title, children }) {
 
         <div style={styles.sidebarFooter}>
           <div style={styles.userBox}>
-            <div style={styles.userEmail}>{user.email || "User"}</div>
-            <div style={styles.userCompany}>{user.companyName || ""}</div>
+            <div style={styles.userEmail}>{displayName}</div>
+            <div style={styles.userCompany}>
+              {user?.email || companyName || ""}
+            </div>
           </div>
 
           <button style={styles.logoutBtn} onClick={handleLogout}>
@@ -98,6 +111,7 @@ const styles = {
     borderRadius: "10px",
     color: "#374151",
     fontWeight: "500",
+    textDecoration: "none",
   },
   linkActive: {
     background: "#2563eb",
@@ -121,6 +135,7 @@ const styles = {
     marginTop: "4px",
     fontSize: "13px",
     color: "#6b7280",
+    wordBreak: "break-word",
   },
   logoutBtn: {
     width: "100%",

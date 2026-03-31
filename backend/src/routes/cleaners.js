@@ -7,9 +7,22 @@ const router = express.Router();
 // GET /cleaners
 router.get("/", authMiddleware, async (req, res) => {
   try {
+    const company = await prisma.company.findFirst({
+      where: {
+        email: req.user.email,
+      },
+    });
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const cleaners = await prisma.cleaner.findMany({
       where: {
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -39,9 +52,22 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
+    const company = await prisma.company.findFirst({
+      where: {
+        email: req.user.email,
+      },
+    });
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const cleaner = await prisma.cleaner.create({
       data: {
-        companyId: req.user.companyId,
+        companyId: company.id,
         name,
         phone,
         status,
@@ -69,10 +95,23 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const { name, phone, status, team, notes } = req.body;
 
+    const company = await prisma.company.findFirst({
+      where: {
+        email: req.user.email,
+      },
+    });
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existing = await prisma.cleaner.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
