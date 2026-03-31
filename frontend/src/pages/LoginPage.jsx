@@ -1,130 +1,88 @@
 import { useState } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
-
-const API = import.meta.env.VITE_API_URL;
+import { API_BASE_URL } from "../config";
 
 export default function LoginPage() {
   const navigate = useNavigate();
 
-  const [form, setForm] = useState({
-    email: "admin@test.com",
-    password: "123456",
-  });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
 
-  function handleChange(e) {
-    setForm({
-      ...form,
-      [e.target.name]: e.target.value,
-    });
-  }
-
-  async function handleSubmit(e) {
+  async function handleLogin(e) {
     e.preventDefault();
     setLoading(true);
-    setError("");
+    setMessage("");
 
     try {
-      const res = await axios.post(`${API_BASE_URL}/auth/login`, form);
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
 
-      localStorage.setItem("token", res.data.token);
-      localStorage.setItem("user", JSON.stringify(res.data.user));
+      const data = await res.json();
 
+      if (!res.ok || !data.ok) {
+        setMessage(data.error || "Login failed");
+        setLoading(false);
+        return;
+      }
+
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+
+      setMessage("Login successful");
       navigate("/dashboard");
-    } catch (err) {
-      setError(err?.response?.data?.error || "Login failed");
+    } catch (error) {
+      console.error("Login error:", error);
+      setMessage("Server error");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={styles.page}>
-      <div style={styles.card}>
-        <h1 style={styles.title}>Cleaning SaaS Login</h1>
-        <p style={styles.subtitle}>Sign in to your dashboard</p>
+    <div style={{ maxWidth: 400, margin: "60px auto", padding: 24 }}>
+      <h1>Cleaning SaaS Login</h1>
 
-        <form onSubmit={handleSubmit} style={styles.form}>
+      <form onSubmit={handleLogin}>
+        <div style={{ marginBottom: 12 }}>
           <input
-            style={styles.input}
             type="email"
-            name="email"
             placeholder="Email"
-            value={form.email}
-            onChange={handleChange}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            style={{ width: "100%", padding: 10 }}
           />
+        </div>
 
+        <div style={{ marginBottom: 12 }}>
           <input
-            style={styles.input}
             type="password"
-            name="password"
             placeholder="Password"
-            value={form.password}
-            onChange={handleChange}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            style={{ width: "100%", padding: 10 }}
           />
+        </div>
 
-          {error ? <div style={styles.error}>{error}</div> : null}
+        <button
+          type="submit"
+          disabled={loading}
+          style={{ width: "100%", padding: 10 }}
+        >
+          {loading ? "Logging in..." : "Login"}
+        </button>
+      </form>
 
-          <button style={styles.button} type="submit" disabled={loading}>
-            {loading ? "Signing in..." : "Sign In"}
-          </button>
-        </form>
-      </div>
+      {message && <p style={{ marginTop: 16 }}>{message}</p>}
     </div>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: "100vh",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "#f4f6f8",
-    padding: "20px",
-  },
-  card: {
-    width: "100%",
-    maxWidth: "400px",
-    background: "#fff",
-    borderRadius: "12px",
-    padding: "28px",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.08)",
-  },
-  title: {
-    margin: 0,
-    fontSize: "28px",
-    fontWeight: "700",
-  },
-  subtitle: {
-    color: "#666",
-    marginTop: "8px",
-    marginBottom: "24px",
-  },
-  form: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "14px",
-  },
-  input: {
-    padding: "12px 14px",
-    borderRadius: "10px",
-    border: "1px solid #d0d7de",
-    fontSize: "16px",
-  },
-  button: {
-    padding: "12px 14px",
-    borderRadius: "10px",
-    border: "none",
-    background: "#111827",
-    color: "#fff",
-    fontSize: "16px",
-    cursor: "pointer",
-  },
-  error: {
-    color: "#b00020",
-    fontSize: "14px",
-  },
-};
