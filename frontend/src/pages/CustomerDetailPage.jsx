@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
+import { API_BASE_URL } from "../config";
 
-const API = import.meta.env.VITE_API_URL;
+const API = API_BASE_URL;
 
 export default function CustomerDetailPage() {
   const token = localStorage.getItem("token");

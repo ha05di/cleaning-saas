@@ -10,44 +10,42 @@ export default function LoginPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
-async function handleLogin(e) {
-  e.preventDefault();
-  setLoading(true);
-  setMessage("");
+  async function handleLogin(e) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage("");
 
-  try {
-    const res = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        email,
-        password,
-      }),
-    });
+    try {
+      const res = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email,
+          password,
+        }),
+      });
 
-    const data = await res.json();
-    console.log("login status:", res.status);
-    console.log("login response:", data);
+      const data = await res.json();
 
-    if (!res.ok) {
-      setMessage(data.error || `Login failed (${res.status})`);
-      return;
+      if (!res.ok) {
+        setMessage(data.error || `Login failed (${res.status})`);
+        return;
+      }
+
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+
+      setMessage("Login successful");
+      navigate("/dashboard");
+    } catch (error) {
+      console.error("Login error:", error);
+      setMessage("Server error");
+    } finally {
+      setLoading(false);
     }
-
-    localStorage.setItem("token", data.token);
-    localStorage.setItem("user", JSON.stringify(data.user));
-
-    setMessage("Login successful");
-    navigate("/dashboard");
-  } catch (error) {
-    console.error("Login error:", error);
-    setMessage("Server error");
-  } finally {
-    setLoading(false);
   }
-}
 
   return (
     <div style={{ maxWidth: 400, margin: "60px auto", padding: 24 }}>
