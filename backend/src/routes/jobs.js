@@ -1,6 +1,7 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const authMiddleware = require("../middleware/auth");
+const getCompanyByUser = require("../lib/getCompanyByUser");
 
 const router = express.Router();
 
@@ -9,8 +10,17 @@ router.get("/", authMiddleware, async (req, res) => {
   try {
     const { status, date } = req.query;
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const where = {
-      companyId: req.user.companyId,
+      companyId: company.id,
     };
 
     if (status) {
@@ -72,10 +82,19 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const customer = await prisma.customer.findFirst({
       where: {
         id: Number(customerId),
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -93,7 +112,7 @@ router.post("/", authMiddleware, async (req, res) => {
       const cleaner = await prisma.cleaner.findFirst({
         where: {
           id: Number(cleanerId),
-          companyId: req.user.companyId,
+          companyId: company.id,
         },
       });
 
@@ -110,7 +129,7 @@ router.post("/", authMiddleware, async (req, res) => {
 
     const job = await prisma.job.create({
       data: {
-        companyId: req.user.companyId,
+        companyId: company.id,
         customerId: Number(customerId),
         cleanerId: finalCleanerId,
         serviceDate: new Date(serviceDate),
@@ -154,10 +173,19 @@ router.put("/:id", authMiddleware, async (req, res) => {
       status,
     } = req.body;
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existing = await prisma.job.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -172,7 +200,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       const customer = await prisma.customer.findFirst({
         where: {
           id: Number(customerId),
-          companyId: req.user.companyId,
+          companyId: company.id,
         },
       });
 
@@ -188,7 +216,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       const cleaner = await prisma.cleaner.findFirst({
         where: {
           id: Number(cleanerId),
-          companyId: req.user.companyId,
+          companyId: company.id,
         },
       });
 
@@ -244,10 +272,19 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
       });
     }
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existing = await prisma.job.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -261,7 +298,7 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
     const cleaner = await prisma.cleaner.findFirst({
       where: {
         id: Number(cleanerId),
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -312,10 +349,19 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       });
     }
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existing = await prisma.job.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -353,10 +399,19 @@ router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     const id = Number(req.params.id);
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existing = await prisma.job.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -397,10 +452,19 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
       });
     }
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existingJob = await prisma.job.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -414,7 +478,7 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
     const cleaner = await prisma.cleaner.findFirst({
       where: {
         id: Number(cleanerId),
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 
@@ -449,4 +513,5 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
     });
   }
 });
+
 module.exports = router;

@@ -1,15 +1,14 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const authMiddleware = require("../middleware/auth");
+const getCompanyByUser = require("../lib/getCompanyByUser");
 
 const router = express.Router();
 
 // GET /company
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const company = await prisma.company.findUnique({
-      where: { id: req.user.companyId },
-    });
+    const company = await getCompanyByUser(req.user);
 
     if (!company) {
       return res.status(404).json({
@@ -36,8 +35,17 @@ router.put("/", authMiddleware, async (req, res) => {
   try {
     const { companyName, ownerName, phone, email, address, timezone } = req.body;
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const updated = await prisma.company.update({
-      where: { id: req.user.companyId },
+      where: { id: company.id },
       data: {
         companyName,
         ownerName,

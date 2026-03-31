@@ -1,17 +1,14 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const authMiddleware = require("../middleware/auth");
+const getCompanyByUser = require("../lib/getCompanyByUser");
 
 const router = express.Router();
 
 // GET /cleaners
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const company = await prisma.company.findFirst({
-      where: {
-        email: req.user.email,
-      },
-    });
+    const company = await getCompanyByUser(req.user);
 
     if (!company) {
       return res.status(404).json({
@@ -52,11 +49,7 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
-    const company = await prisma.company.findFirst({
-      where: {
-        email: req.user.email,
-      },
-    });
+    const company = await getCompanyByUser(req.user);
 
     if (!company) {
       return res.status(404).json({
@@ -95,11 +88,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const { name, phone, status, team, notes } = req.body;
 
-    const company = await prisma.company.findFirst({
-      where: {
-        email: req.user.email,
-      },
-    });
+    const company = await getCompanyByUser(req.user);
 
     if (!company) {
       return res.status(404).json({

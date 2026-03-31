@@ -1,6 +1,7 @@
 const express = require("express");
 const prisma = require("../lib/prisma");
 const authMiddleware = require("../middleware/auth");
+const getCompanyByUser = require("../lib/getCompanyByUser");
 
 const router = express.Router();
 
@@ -9,9 +10,18 @@ router.get("/", authMiddleware, async (req, res) => {
   try {
     const { search = "" } = req.query;
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const customers = await prisma.customer.findMany({
       where: {
-        companyId: req.user.companyId,
+        companyId: company.id,
         OR: [
           { name: { contains: search, mode: "insensitive" } },
           { phone: { contains: search, mode: "insensitive" } },
@@ -46,9 +56,18 @@ router.post("/", authMiddleware, async (req, res) => {
       });
     }
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const customer = await prisma.customer.create({
       data: {
-        companyId: req.user.companyId,
+        companyId: company.id,
         name,
         phone,
         address,
@@ -75,10 +94,19 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const { name, phone, address, notes } = req.body;
 
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({
+        ok: false,
+        error: "Company not found",
+      });
+    }
+
     const existing = await prisma.customer.findFirst({
       where: {
         id,
-        companyId: req.user.companyId,
+        companyId: company.id,
       },
     });
 

@@ -8,31 +8,19 @@ datasource db {
 }
 
 model Company {
-  id          Int        @id @default(autoincrement())
-  companyName String
-  ownerName   String?
-  phone       String?
-  email       String?
-  address     String?
-  timezone    String?    @default("America/New_York")
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
+  id             Int        @id @default(autoincrement())
+  companyName    String
+  ownerName      String?
+  phone          String?
+  email          String?
+  address        String?
+  timezone       String?
+  createdAt      DateTime   @default(now())
+  supabaseUserId String?    @unique
 
-  users       User[]
-  customers   Customer[]
-  cleaners    Cleaner[]
-  jobs        Job[]
-}
-
-model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String
-  companyId    Int
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  company      Company  @relation(fields: [companyId], references: [id])
+  customers      Customer[]
+  cleaners       Cleaner[]
+  jobs           Job[]
 }
 
 model Customer {
@@ -43,9 +31,8 @@ model Customer {
   address    String?
   notes      String?
   createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
 
-  company    Company   @relation(fields: [companyId], references: [id])
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   jobs       Job[]
 }
 
@@ -58,9 +45,8 @@ model Cleaner {
   team       String?
   notes      String?
   createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
 
-  company    Company   @relation(fields: [companyId], references: [id])
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   jobs       Job[]
 }
 
@@ -76,9 +62,8 @@ model Job {
   notes       String?
   status      String    @default("pending")
   createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
 
-  company     Company   @relation(fields: [companyId], references: [id])
-  customer    Customer  @relation(fields: [customerId], references: [id])
-  cleaner     Cleaner?  @relation(fields: [cleanerId], references: [id])
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cleaner     Cleaner?  @relation(fields: [cleanerId], references: [id], onDelete: SetNull)
 }
