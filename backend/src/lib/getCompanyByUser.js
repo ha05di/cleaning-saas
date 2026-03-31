@@ -1,13 +1,27 @@
 const prisma = require("./prisma");
 
 async function getCompanyByUser(user) {
-  if (!user?.id) return null;
+  if (!user?.email) return null;
 
-  const company = await prisma.company.findFirst({
+  let company = await prisma.company.findFirst({
     where: {
-      supabaseUserId: user.id,
+      OR: [
+        { supabaseUserId: user.id },
+        { email: user.email },
+      ],
     },
   });
+
+  if (!company) return null;
+
+  if (!company.supabaseUserId && user.id) {
+    company = await prisma.company.update({
+      where: { id: company.id },
+      data: {
+        supabaseUserId: user.id,
+      },
+    });
+  }
 
   return company;
 }
