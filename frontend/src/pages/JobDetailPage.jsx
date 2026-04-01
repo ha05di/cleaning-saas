@@ -145,7 +145,7 @@ export default function JobDetailPage() {
   }
 
   return (
-    <AppLayout title={`Job #${job.id}`}>
+    <AppLayout title={job.orderNo || `Job #${job.id}`}>
       <div style={styles.page}>
         <div style={styles.topActions}>
           <button style={styles.secondaryBtn} onClick={() => navigate("/jobs")}>
@@ -159,11 +159,17 @@ export default function JobDetailPage() {
 
         <div style={styles.card}>
           <div style={styles.headerRow}>
-            <h2 style={styles.cardTitle}>Job Information</h2>
+            <div style={styles.headerLeft}>
+              <h2 style={styles.cardTitle}>Job Information</h2>
+              <div style={styles.orderNoBadge}>
+                {job.orderNo || `JOB-${job.id}`}
+              </div>
+            </div>
             <span style={getStatusBadge(job.status)}>{job.status}</span>
           </div>
 
           <div style={styles.infoGrid}>
+            <InfoItem label="Order No" value={job.orderNo || `JOB-${job.id}`} />
             <InfoItem label="Job ID" value={`#${job.id}`} />
             <InfoItem label="Customer" value={job.customer?.name || "-"} />
             <InfoItem label="Phone" value={job.customer?.phone || "-"} />
@@ -172,6 +178,9 @@ export default function JobDetailPage() {
             <InfoItem label="Time" value={job.serviceTime || "-"} />
             <InfoItem label="Service Type" value={job.serviceType || "-"} />
             <InfoItem label="Cleaner" value={job.cleaner?.name || "Not assigned"} />
+            <InfoItem label="Source" value={job.source || "-"} />
+            <InfoItem label="Created By" value={job.createdBy || "-"} />
+            <InfoItem label="External Ref" value={job.externalRef || "-"} />
           </div>
         </div>
 
@@ -318,14 +327,28 @@ const styles = {
   headerRow: {
     display: "flex",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "12px",
     marginBottom: "16px",
     flexWrap: "wrap",
   },
+  headerLeft: {
+    display: "grid",
+    gap: "10px",
+  },
   cardTitle: {
     margin: 0,
     fontSize: "20px",
+  },
+  orderNoBadge: {
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    borderRadius: "999px",
+    padding: "6px 12px",
+    fontSize: "13px",
+    fontWeight: "700",
+    width: "fit-content",
   },
   infoGrid: {
     display: "grid",

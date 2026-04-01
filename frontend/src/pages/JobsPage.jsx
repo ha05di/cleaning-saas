@@ -218,13 +218,15 @@ export default function JobsPage() {
       const serviceType = (job.serviceType || "").toLowerCase();
       const status = (job.status || "").toLowerCase();
       const serviceTime = (job.serviceTime || "").toLowerCase();
+      const orderNo = (job.orderNo || "").toLowerCase();
 
       return (
         customerName.includes(q) ||
         cleanerName.includes(q) ||
         serviceType.includes(q) ||
         status.includes(q) ||
-        serviceTime.includes(q)
+        serviceTime.includes(q) ||
+        orderNo.includes(q)
       );
     });
   }, [jobs, search]);
@@ -361,7 +363,7 @@ export default function JobsPage() {
 
           <input
             style={styles.input}
-            placeholder="Search customer, cleaner, type, status, time"
+            placeholder="Search order no, customer, cleaner, type, status, time"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -386,20 +388,26 @@ export default function JobsPage() {
           ) : (
             filteredJobs.map((job) => (
               <div key={job.id} style={styles.card}>
-                <div
-                  style={{ ...styles.customerName, cursor: "pointer" }}
-                  onClick={() => navigate(`/jobs/${job.id}`)}
-                >
-                  {job.customer?.name || "Unknown Customer"}
+                <div style={styles.headerTop}>
+                  <div
+                    style={{ ...styles.customerName, cursor: "pointer" }}
+                    onClick={() => navigate(`/jobs/${job.id}`)}
+                  >
+                    {job.customer?.name || "Unknown Customer"}
+                  </div>
+
+                  <div style={styles.orderNoBadge}>
+                    {job.orderNo || `JOB-${job.id}`}
+                  </div>
                 </div>
 
                 <div style={styles.meta}>
-                  {formatDate(job.serviceDate)}
+                  Date: {formatDate(job.serviceDate)}
                   {job.serviceTime ? ` · ${job.serviceTime}` : ""}
                 </div>
 
                 <div style={styles.meta}>
-                  {job.serviceType || "No service type"}
+                  Service: {job.serviceType || "No service type"}
                 </div>
 
                 <div style={styles.meta}>
@@ -411,6 +419,10 @@ export default function JobsPage() {
 
                 <div style={styles.meta}>
                   Cleaner: {job.cleaner?.name || "Not assigned"}
+                </div>
+
+                <div style={styles.meta}>
+                  Source: {job.source || "-"}
                 </div>
 
                 <div style={styles.actions}>
@@ -678,10 +690,28 @@ const styles = {
     border: "1px solid #e5e7eb",
     boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
   },
+  headerTop: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: "12px",
+    flexWrap: "wrap",
+    marginBottom: "8px",
+  },
   customerName: {
     fontSize: "22px",
     fontWeight: "700",
     marginBottom: "8px",
+  },
+  orderNoBadge: {
+    background: "#eff6ff",
+    color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    borderRadius: "999px",
+    padding: "6px 12px",
+    fontSize: "13px",
+    fontWeight: "700",
+    whiteSpace: "nowrap",
   },
   meta: {
     color: "#4b5563",
