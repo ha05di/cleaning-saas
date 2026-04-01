@@ -5,6 +5,45 @@ const getCompanyByUser = require("../lib/getCompanyByUser");
 
 const router = express.Router();
 
+function formatDatePart(date = new Date()) {
+  const yy = String(date.getFullYear()).slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yy}${mm}${dd}`;
+}
+
+async function generateOrderNo(companyId) {
+  const datePart = formatDatePart(new Date());
+  const prefix = `UF-${datePart}-`;
+
+  const latestJob = await prisma.job.findFirst({
+    where: {
+      companyId,
+      orderNo: {
+        startsWith: prefix,
+      },
+    },
+    orderBy: {
+      orderNo: "desc",
+    },
+    select: {
+      orderNo: true,
+    },
+  });
+
+  let nextSeq = 1;
+
+  if (latestJob?.orderNo) {
+    const lastPart = latestJob.orderNo.split("-").pop();
+    const parsed = Number(lastPart);
+    if (!Number.isNaN(parsed)) {
+      nextSeq = parsed + 1;
+    }
+  }
+
+  return `${prefix}${String(nextSeq).padStart(4, "0")}`;
+}
+
 // GET /jobs
 router.get("/", authMiddleware, async (req, res) => {
   try {
@@ -43,10 +82,7 @@ router.get("/", authMiddleware, async (req, res) => {
         customer: true,
         cleaner: true,
       },
-      orderBy: [
-        { serviceDate: "asc" },
-        { createdAt: "desc" },
-      ],
+      orderBy: [{ serviceDate: "asc" }, { createdAt: "desc" }],
     });
 
     return res.json({
@@ -73,6 +109,10 @@ router.post("/", authMiddleware, async (req, res) => {
       serviceType,
       address,
       notes,
+      source,
+      externalRef,
+      createdBy,
+      workspaceId,
     } = req.body;
 
     if (!customerId || !serviceDate) {
@@ -107,6 +147,7 @@ router.post("/", authMiddleware, async (req, res) => {
 
     let finalCleanerId = null;
     let finalStatus = "pending";
+    let assignedAt = null;
 
     if (cleanerId) {
       const cleaner = await prisma.cleaner.findFirst({
@@ -125,11 +166,15 @@ router.post("/", authMiddleware, async (req, res) => {
 
       finalCleanerId = Number(cleanerId);
       finalStatus = "assigned";
+      assignedAt = new Date();
     }
+
+    const orderNo = await generateOrderNo(company.id);
 
     const job = await prisma.job.create({
       data: {
         companyId: company.id,
+        workspaceId: workspaceId ? Number(workspaceId) : null,
         customerId: Number(customerId),
         cleanerId: finalCleanerId,
         serviceDate: new Date(serviceDate),
@@ -138,6 +183,11 @@ router.post("/", authMiddleware, async (req, res) => {
         address: address || customer.address || "",
         notes,
         status: finalStatus,
+        orderNo,
+        source: source || "admin",
+        externalRef: externalRef || null,
+        createdBy: createdBy || "owner",
+        assignedAt,
       },
       include: {
         customer: true,
@@ -171,6 +221,10 @@ router.put("/:id", authMiddleware, async (req, res) => {
       address,
       notes,
       status,
+      source,
+      externalRef,
+      createdBy,
+      workspaceId,
     } = req.body;
 
     const company = await getCompanyByUser(req.user);
@@ -228,18 +282,50 @@ router.put("/:id", authMiddleware, async (req, res) => {
       }
     }
 
+    const nextStatus = status || existing.status;
+    const nextCleanerId =
+      typeof cleanerId !== "undefined"
+        ? cleanerId
+          ? Number(cleanerId)
+          : null
+        : existing.cleanerId;
+
+    const updateData = {
+      customerId: customerId ? Number(customerId) : undefined,
+      cleanerId: typeof cleanerId !== "undefined" ? nextCleanerId : undefined,
+      serviceDate: serviceDate ? new Date(serviceDate) : undefined,
+      serviceTime,
+      serviceType,
+      address,
+      notes,
+      status,
+      source,
+      externalRef,
+      createdBy,
+      workspaceId: typeof workspaceId !== "undefined"
+        ? (workspaceId ? Number(workspaceId) : null)
+        : undefined,
+    };
+
+    if (
+      nextCleanerId &&
+      nextStatus === "assigned" &&
+      !existing.assignedAt
+    ) {
+      updateData.assignedAt = new Date();
+    }
+
+    if (nextStatus === "completed") {
+      updateData.completedAt = existing.completedAt || new Date();
+    }
+
+    if (nextStatus === "cancelled") {
+      updateData.cancelledAt = existing.cancelledAt || new Date();
+    }
+
     const job = await prisma.job.update({
       where: { id },
-      data: {
-        customerId: customerId ? Number(customerId) : undefined,
-        cleanerId: cleanerId ? Number(cleanerId) : null,
-        serviceDate: serviceDate ? new Date(serviceDate) : undefined,
-        serviceTime,
-        serviceType,
-        address,
-        notes,
-        status,
-      },
+      data: updateData,
       include: {
         customer: true,
         cleaner: true,
@@ -314,6 +400,7 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
       data: {
         cleanerId: Number(cleanerId),
         status: "assigned",
+        assignedAt: existing.assignedAt || new Date(),
       },
       include: {
         customer: true,
@@ -340,7 +427,7 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const { status } = req.body;
 
-    const allowed = ["pending", "assigned", "completed"];
+    const allowed = ["pending", "assigned", "completed", "cancelled"];
 
     if (!allowed.includes(status)) {
       return res.status(400).json({
@@ -372,9 +459,23 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       });
     }
 
+    const data = { status };
+
+    if (status === "assigned" && existing.cleanerId && !existing.assignedAt) {
+      data.assignedAt = new Date();
+    }
+
+    if (status === "completed") {
+      data.completedAt = existing.completedAt || new Date();
+    }
+
+    if (status === "cancelled") {
+      data.cancelledAt = existing.cancelledAt || new Date();
+    }
+
     const job = await prisma.job.update({
       where: { id },
-      data: { status },
+      data,
       include: {
         customer: true,
         cleaner: true,
@@ -494,6 +595,7 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
       data: {
         cleanerId: Number(cleanerId),
         status: "assigned",
+        assignedAt: existingJob.assignedAt || new Date(),
       },
       include: {
         customer: true,

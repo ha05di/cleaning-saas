@@ -8,51 +8,199 @@ datasource db {
 }
 
 model Company {
-  id             Int        @id @default(autoincrement())
-  companyName    String
-  ownerName      String?
-  phone          String?
-  email          String?
-  address        String?
-  timezone       String?
-  createdAt      DateTime   @default(now())
-  supabaseUserId String?    @unique
+  id                 Int      @id @default(autoincrement())
+  companyName        String
+  ownerName          String?
+  phone              String?
+  email              String?
+  address            String?
+  timezone           String?  @default("America/New_York")
+  plan               String   @default("basic")
+  status             String   @default("active")
+  supabaseUserId     String?  @unique
+  defaultWorkspaceId Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @default(now()) @updatedAt
 
-  customers      Customer[]
-  cleaners       Cleaner[]
-  jobs           Job[]
+  customers             Customer[]
+  cleaners              Cleaner[]
+  jobs                  Job[]
+  teams                 Team[]
+  cleanerAvailabilities CleanerAvailability[]
+  companyUsers          CompanyUser[]
+
+  workspaces       Workspace[] @relation("CompanyWorkspaces")
+  defaultWorkspace Workspace?  @relation("CompanyDefaultWorkspace", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
+
+  @@index([plan])
+  @@index([status])
+  @@index([email])
+}
+
+model Workspace {
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  name        String
+  slug        String?
+  isActive    Boolean  @default(true)
+  source      String?
+  externalRef String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  company             Company   @relation("CompanyWorkspaces", fields: [companyId], references: [id], onDelete: Cascade)
+  defaultForCompanies Company[] @relation("CompanyDefaultWorkspace")
+
+  customers             Customer[]
+  cleaners              Cleaner[]
+  jobs                  Job[]
+  teams                 Team[]
+  cleanerAvailabilities CleanerAvailability[]
+  companyUsers          CompanyUser[]
+
+  @@index([companyId])
+  @@index([slug])
+  @@index([isActive])
+  @@index([source])
+  @@index([externalRef])
+}
+
+model CompanyUser {
+  id             Int       @id @default(autoincrement())
+  companyId      Int
+  workspaceId    Int?
+  supabaseUserId String?   @unique
+  email          String
+  fullName       String?
+  role           String    @default("owner")
+  status         String    @default("active")
+  source         String?
+  externalRef    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+  lastLoginAt    DateTime?
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, email])
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([role])
+  @@index([status])
 }
 
 model Customer {
-  id         Int      @id @default(autoincrement())
-  companyId  Int
-  name       String
-  phone      String?
-  address    String?
-  notes      String?
-  createdAt  DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int?
+  name        String
+  phone       String?
+  address     String?
+  notes       String?
+  source      String?
+  externalRef String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  jobs       Job[]
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  jobs      Job[]
+
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([source])
+  @@index([externalRef])
+}
+
+model Team {
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int?
+  name        String
+  leaderName  String?
+  color       String?
+  isActive    Boolean  @default(true)
+  source      String?
+  externalRef String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  cleaners  Cleaner[]
+
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([isActive])
+  @@index([source])
+  @@index([externalRef])
 }
 
 model Cleaner {
-  id         Int      @id @default(autoincrement())
-  companyId  Int
-  name       String
-  phone      String?
-  status     String   @default("active")
-  team       String?
-  notes      String?
-  createdAt  DateTime @default(now())
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int?
+  name        String
+  phone       String?
+  status      String   @default("active")
+  team        String? // 保留，兼容你当前前端/后端
+  teamId      Int?
+  notes       String?
+  source      String?
+  externalRef String?
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
 
-  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  jobs       Job[]
+  company        Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace      Workspace?            @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  teamRef        Team?                 @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  jobs           Job[]
+  availabilities CleanerAvailability[]
+
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([teamId])
+  @@index([status])
+  @@index([source])
+  @@index([externalRef])
+}
+
+model CleanerAvailability {
+  id          Int      @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int?
+  cleanerId   Int
+  date        DateTime
+  startTime   String?
+  endTime     String?
+  isOff       Boolean  @default(false)
+  notes       String?
+  createdBy   String?
+  source      String?
+  externalRef String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now()) @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  cleaner   Cleaner    @relation(fields: [cleanerId], references: [id], onDelete: Cascade)
+
+  @@unique([cleanerId, date])
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([cleanerId])
+  @@index([date])
+  @@index([source])
+  @@index([externalRef])
 }
 
 model Job {
-  id          Int       @id @default(autoincrement())
+  id          Int      @id @default(autoincrement())
   companyId   Int
+  workspaceId Int?
   customerId  Int
   cleanerId   Int?
   serviceDate DateTime
@@ -60,10 +208,31 @@ model Job {
   serviceType String?
   address     String?
   notes       String?
-  status      String    @default("pending")
-  createdAt   DateTime  @default(now())
+  status      String   @default("pending")
 
-  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  cleaner     Cleaner?  @relation(fields: [cleanerId], references: [id], onDelete: SetNull)
+  orderNo     String?
+  source      String?
+  externalRef String?
+  createdBy   String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @default(now()) @updatedAt
+  assignedAt  DateTime?
+  completedAt DateTime?
+  cancelledAt DateTime?
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  customer  Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  cleaner   Cleaner?   @relation(fields: [cleanerId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([customerId])
+  @@index([cleanerId])
+  @@index([serviceDate])
+  @@index([status])
+  @@index([orderNo])
+  @@index([source])
+  @@index([externalRef])
 }
