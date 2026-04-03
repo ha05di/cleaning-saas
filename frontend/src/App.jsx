@@ -13,9 +13,14 @@ import LandingPage from "./pages/LandingPage";
 import { useAuth } from "./context/AuthContext";
 import NewJobPage from "./pages/NewJobPage";
 import NewCustomerPage from "./pages/NewCustomerPage";
+import { DEV_BYPASS_AUTH } from "./config";
 
 function PrivateRoute({ children }) {
   const { session, loading } = useAuth();
+
+  if (DEV_BYPASS_AUTH) {
+    return children;
+  }
 
   if (loading) {
     return <div className="p-6">Checking session...</div>;
