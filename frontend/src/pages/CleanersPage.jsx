@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
@@ -13,12 +13,42 @@ export default function CleanersPage() {
   const [cleaners, setCleaners] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [search, setSearch] = useState("");
-  const [actionMenuId, setActionMenuId] = useState(null);
   const [loading, setLoading] = useState(true);
+
+  const [actionMenu, setActionMenu] = useState(null);
+  const actionBtnRefs = useRef({});
 
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside() {
+      setActionMenu(null);
+    }
+
+    function handleScroll() {
+      if (actionMenu) {
+        setActionMenu(null);
+      }
+    }
+
+    function handleResize() {
+      if (actionMenu) {
+        setActionMenu(null);
+      }
+    }
+
+    document.addEventListener("click", handleClickOutside);
+    window.addEventListener("scroll", handleScroll, true);
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+      window.removeEventListener("scroll", handleScroll, true);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [actionMenu]);
 
   async function loadData() {
     try {
@@ -118,6 +148,38 @@ export default function CleanersPage() {
       bg: "#FEF3F2",
       border: "#FECDCA",
     };
+  }
+
+  function toggleActionMenu(e, cleanerId) {
+    e.stopPropagation();
+
+    if (actionMenu?.id === cleanerId) {
+      setActionMenu(null);
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+
+    const menuWidth = 170;
+    const menuHeight = 56;
+
+    let left = rect.right - menuWidth;
+    let top = rect.bottom + 8;
+
+    if (left < 12) left = 12;
+    if (left + menuWidth > window.innerWidth - 12) {
+      left = window.innerWidth - menuWidth - 12;
+    }
+
+    if (top + menuHeight > window.innerHeight - 12) {
+      top = rect.top - menuHeight - 8;
+    }
+
+    setActionMenu({
+      id: cleanerId,
+      top,
+      left,
+    });
   }
 
   const filteredCleaners = useMemo(() => {
@@ -279,30 +341,14 @@ export default function CleanersPage() {
                           <td style={{ ...styles.td, textAlign: "right" }}>
                             <div style={styles.actionWrap}>
                               <button
+                                ref={(el) => {
+                                  actionBtnRefs.current[cleaner.id] = el;
+                                }}
                                 style={styles.dotsBtn}
-                                onClick={() =>
-                                  setActionMenuId((prev) =>
-                                    prev === cleaner.id ? null : cleaner.id
-                                  )
-                                }
+                                onClick={(e) => toggleActionMenu(e, cleaner.id)}
                               >
                                 •••
                               </button>
-
-                              {actionMenuId === cleaner.id && (
-                                <div style={styles.menu}>
-                                  <button
-                                    style={styles.menuItem}
-                                    onClick={() =>
-                                      navigate(`/cleaners/${cleaner.id}`, {
-                                        state: { cleaner },
-                                      })
-                                    }
-                                  >
-                                    View / Edit
-                                  </button>
-                                </div>
-                              )}
                             </div>
                           </td>
                         </tr>
@@ -338,6 +384,31 @@ export default function CleanersPage() {
             </div>
           </div>
         </div>
+
+        {actionMenu && (
+          <div
+            style={{
+              ...styles.menu,
+              position: "fixed",
+              top: actionMenu.top,
+              left: actionMenu.left,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              style={styles.menuItem}
+              onClick={() => {
+                const cleaner = filteredCleaners.find((c) => c.id === actionMenu.id);
+                setActionMenu(null);
+                navigate(`/cleaners/${actionMenu.id}`, {
+                  state: { cleaner },
+                });
+              }}
+            >
+              View / Edit
+            </button>
+          </div>
+        )}
       </div>
     </AppLayout>
   );
@@ -425,7 +496,6 @@ const styles = {
     background: "#fff",
     border: "1px solid #D0D5DD",
     borderRadius: "18px",
-    overflow: "hidden",
     boxShadow: "0 2px 8px rgba(16,24,40,0.04)",
   },
   tableWrap: {
@@ -506,7 +576,6 @@ const styles = {
   },
 
   actionWrap: {
-    position: "relative",
     display: "inline-block",
   },
   dotsBtn: {
@@ -520,16 +589,13 @@ const styles = {
     borderRadius: "10px",
   },
   menu: {
-    position: "absolute",
-    top: "calc(100% + 8px)",
-    right: 0,
-    minWidth: "150px",
+    minWidth: "170px",
     background: "#fff",
     border: "1px solid #EAECF0",
     borderRadius: "12px",
     boxShadow: "0 14px 30px rgba(16,24,40,0.12)",
     overflow: "hidden",
-    zIndex: 20,
+    zIndex: 9999,
   },
   menuItem: {
     width: "100%",

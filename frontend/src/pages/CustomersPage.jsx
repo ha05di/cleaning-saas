@@ -3,6 +3,7 @@ import axios from "axios";
 import AppLayout from "../components/AppLayout";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../config";
+import CustomerEditDrawer from "./CustomerEditDrawer";
 
 const API = API_BASE_URL;
 
@@ -11,19 +12,37 @@ export default function CustomersPage() {
   const navigate = useNavigate();
 
   const [customers, setCustomers] = useState([]);
-  const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState("");
-  const [showCreatePanel, setShowCreatePanel] = useState(false);
-  const [loading, setLoading] = useState(false);
-
-  const [form, setForm] = useState({
-    name: "",
-    phone: "",
-    address: "",
-  });
+  const [menuState, setMenuState] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(null);
 
   useEffect(() => {
     fetchCustomers();
+  }, []);
+
+  useEffect(() => {
+    function handleWindowClick() {
+      setMenuState(null);
+    }
+
+    function handleWindowScroll() {
+      setMenuState(null);
+    }
+
+    function handleWindowResize() {
+      setMenuState(null);
+    }
+
+    document.addEventListener("click", handleWindowClick);
+    window.addEventListener("scroll", handleWindowScroll, true);
+    window.addEventListener("resize", handleWindowResize);
+
+    return () => {
+      document.removeEventListener("click", handleWindowClick);
+      window.removeEventListener("scroll", handleWindowScroll, true);
+      window.removeEventListener("resize", handleWindowResize);
+    };
   }, []);
 
   async function fetchCustomers() {
@@ -37,67 +56,57 @@ export default function CustomersPage() {
     }
   }
 
-  function handleChange(e) {
-    setForm((prev) => ({
-      ...prev,
-      [e.target.name]: e.target.value,
-    }));
-  }
+  function openMenu(e, customer) {
+    e.stopPropagation();
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-
-    if (!form.name.trim()) {
-      alert("Customer name is required");
+    if (menuState?.id === customer.id) {
+      setMenuState(null);
       return;
     }
 
-    setLoading(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 180;
+    const menuHeight = 110;
 
-    try {
-      if (editingId) {
-        await axios.put(`${API}/customers/${editingId}`, form, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } else {
-        await axios.post(`${API}/customers`, form, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
+    let left = rect.right - menuWidth;
+    let top = rect.bottom + 8;
 
-      resetForm();
-      setShowCreatePanel(false);
-      await fetchCustomers();
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to save customer");
-    } finally {
-      setLoading(false);
+    if (left < 12) left = 12;
+    if (left + menuWidth > window.innerWidth - 12) {
+      left = window.innerWidth - menuWidth - 12;
     }
+
+    if (top + menuHeight > window.innerHeight - 12) {
+      top = rect.top - menuHeight - 8;
+    }
+
+    setMenuState({
+      id: customer.id,
+      customer,
+      top,
+      left,
+    });
   }
 
   function handleEdit(customer) {
-    setEditingId(customer.id);
-    setShowCreatePanel(true);
-    setForm({
-      name: customer.name || "",
-      phone: customer.phone || "",
-      address: customer.address || "",
-    });
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    setEditingCustomer(customer);
+    setDrawerOpen(true);
+    setMenuState(null);
   }
 
-  function resetForm() {
-    setEditingId(null);
-    setForm({
-      name: "",
-      phone: "",
-      address: "",
-    });
-  }
+  async function handleDelete(customer) {
+    const confirmed = window.confirm(`Delete customer "${customer.name}"?`);
+    if (!confirmed) return;
 
-  function handleNewCustomerClick() {
-    resetForm();
-    setShowCreatePanel((prev) => !prev);
+    try {
+      await axios.delete(`${API}/customers/${customer.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMenuState(null);
+      await fetchCustomers();
+    } catch (error) {
+      alert(error?.response?.data?.error || "Failed to delete customer");
+    }
   }
 
   const filteredCustomers = useMemo(() => {
@@ -108,11 +117,17 @@ export default function CustomersPage() {
       const name = (c.name || "").toLowerCase();
       const phone = (c.phone || "").toLowerCase();
       const address = (c.address || "").toLowerCase();
+      const email = (c.email || "").toLowerCase();
+      const companyName = (c.companyName || "").toLowerCase();
+      const leadSource = (c.leadSource || "").toLowerCase();
 
       return (
         name.includes(q) ||
         phone.includes(q) ||
-        address.includes(q)
+        address.includes(q) ||
+        email.includes(q) ||
+        companyName.includes(q) ||
+        leadSource.includes(q)
       );
     });
   }, [customers, search]);
@@ -139,11 +154,7 @@ export default function CustomersPage() {
             style={styles.newBtn}
             onClick={() => navigate("/customers/new")}
           >
-            {showCreatePanel
-              ? editingId
-                ? "Close Edit"
-                : "Close"
-              : "+ New Customer"}
+            + New Customer
           </button>
         </div>
 
@@ -154,72 +165,10 @@ export default function CustomersPage() {
           <KpiCard label="Missing Phone" value={stats.missingPhone} />
         </div>
 
-        {showCreatePanel && (
-          <div style={styles.createPanel}>
-            <div style={styles.sectionTitle}>
-              {editingId ? "Edit Customer" : "Create New Customer"}
-            </div>
-            <div style={styles.sectionSub}>
-              {editingId
-                ? "Update customer information."
-                : "Add a new customer to your database."}
-            </div>
-
-            <form onSubmit={handleSubmit} style={styles.createGrid}>
-              <input
-                style={styles.input}
-                name="name"
-                placeholder="Customer Name"
-                value={form.name}
-                onChange={handleChange}
-              />
-
-              <input
-                style={styles.input}
-                name="phone"
-                placeholder="Phone"
-                value={form.phone}
-                onChange={handleChange}
-              />
-
-              <input
-                style={styles.input}
-                name="address"
-                placeholder="Address"
-                value={form.address}
-                onChange={handleChange}
-              />
-
-              <button type="submit" style={styles.primaryBtn} disabled={loading}>
-                {loading
-                  ? editingId
-                    ? "Updating..."
-                    : "Creating..."
-                  : editingId
-                  ? "Update Customer"
-                  : "Create Customer"}
-              </button>
-
-              {editingId && (
-                <button
-                  type="button"
-                  style={styles.secondaryBtn}
-                  onClick={() => {
-                    resetForm();
-                    setShowCreatePanel(false);
-                  }}
-                >
-                  Cancel
-                </button>
-              )}
-            </form>
-          </div>
-        )}
-
         <div style={styles.searchBar}>
           <input
             style={styles.input}
-            placeholder="Search by name, phone, or address"
+            placeholder="Search by name, phone, address, email or lead source"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -252,22 +201,23 @@ export default function CustomersPage() {
                   <div style={styles.nameMain}>
                     {customer.name || "Unnamed Customer"}
                   </div>
+                  {!!customer.companyName && (
+                    <div style={styles.nameSub}>{customer.companyName}</div>
+                  )}
                 </div>
 
                 <div style={styles.phoneCell}>
-                  <div style={styles.cellMain}>
-                    {customer.phone || "-"}
-                  </div>
+                  <div style={styles.cellMain}>{customer.phone || "-"}</div>
                 </div>
 
                 <div style={styles.addressCell}>
-                  <div style={styles.cellMain}>
-                    {customer.address || "-"}
-                  </div>
+                  <div style={styles.cellMain}>{customer.address || "-"}</div>
                 </div>
 
                 <div style={styles.statusCell}>
-                  <div style={customer.phone ? styles.greenBadge : styles.grayBadge}>
+                  <div
+                    style={customer.phone ? styles.greenBadge : styles.grayBadge}
+                  >
                     {customer.phone ? "Active" : "Incomplete"}
                   </div>
                 </div>
@@ -276,16 +226,57 @@ export default function CustomersPage() {
                   style={styles.actionsCell}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <CustomerActionMenu
-                    customer={customer}
-                    onEdit={() => handleEdit(customer)}
-                    refresh={fetchCustomers}
-                  />
+                  <button
+                    style={styles.menuBtn}
+                    onClick={(e) => openMenu(e, customer)}
+                  >
+                    •••
+                  </button>
                 </div>
               </div>
             ))
           )}
         </div>
+
+        {menuState && (
+          <div
+            style={{
+              ...styles.menu,
+              position: "fixed",
+              top: menuState.top,
+              left: menuState.left,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              style={styles.menuItem}
+              onClick={() => handleEdit(menuState.customer)}
+            >
+              Edit
+            </button>
+
+            <button
+              style={{ ...styles.menuItem, ...styles.menuDanger }}
+              onClick={() => handleDelete(menuState.customer)}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+
+        <CustomerEditDrawer
+          open={drawerOpen}
+          customer={editingCustomer}
+          onClose={() => {
+            setDrawerOpen(false);
+            setEditingCustomer(null);
+          }}
+          onSaved={async () => {
+            await fetchCustomers();
+            setDrawerOpen(false);
+            setEditingCustomer(null);
+          }}
+        />
       </div>
     </AppLayout>
   );
@@ -300,58 +291,11 @@ function KpiCard({ label, value }) {
   );
 }
 
-function CustomerActionMenu({ customer, onEdit, refresh }) {
-  const token = localStorage.getItem("token");
-  const [open, setOpen] = useState(false);
-
-  async function remove() {
-    const confirmed = window.confirm(
-      `Delete customer "${customer.name}"?`
-    );
-    if (!confirmed) return;
-
-    try {
-      await axios.delete(`${API}/customers/${customer.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refresh();
-      setOpen(false);
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to delete customer");
-    }
-  }
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        style={styles.menuBtn}
-        onClick={() => setOpen((prev) => !prev)}
-      >
-        •••
-      </button>
-
-      {open && (
-        <div style={styles.menu}>
-          <button style={styles.menuItem} onClick={onEdit}>
-            Edit
-          </button>
-
-          <button
-            style={{ ...styles.menuItem, ...styles.menuDanger }}
-            onClick={remove}
-          >
-            Delete
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 const styles = {
   page: {
     display: "grid",
     gap: 16,
+    paddingBottom: 24,
   },
 
   header: {
@@ -415,34 +359,6 @@ const styles = {
     color: "#111827",
   },
 
-  createPanel: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 18,
-    padding: 18,
-    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
-  },
-
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: 800,
-    color: "#111827",
-  },
-
-  sectionSub: {
-    marginTop: 4,
-    fontSize: 13,
-    color: "#6b7280",
-    marginBottom: 14,
-  },
-
-  createGrid: {
-    display: "grid",
-    gridTemplateColumns: "1.4fr 1fr 1.6fr auto auto",
-    gap: 10,
-    alignItems: "center",
-  },
-
   searchBar: {
     background: "#fff",
     border: "1px solid #e5e7eb",
@@ -463,33 +379,12 @@ const styles = {
     boxSizing: "border-box",
   },
 
-  primaryBtn: {
-    padding: "12px 14px",
-    border: "none",
-    borderRadius: 12,
-    background: "#0f172a",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 14,
-  },
-
-  secondaryBtn: {
-    padding: "12px 14px",
-    border: "1px solid #d1d5db",
-    borderRadius: 12,
-    background: "#fff",
-    cursor: "pointer",
-    fontWeight: 700,
-    fontSize: 14,
-  },
-
   tableWrap: {
     background: "#fff",
     border: "1px solid #e5e7eb",
     borderRadius: 18,
-    overflow: "hidden",
     boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+    overflow: "hidden",
   },
 
   tableHeader: {
@@ -524,6 +419,12 @@ const styles = {
     fontSize: 18,
     fontWeight: 800,
     color: "#0f172a",
+  },
+
+  nameSub: {
+    marginTop: 4,
+    fontSize: 13,
+    color: "#6b7280",
   },
 
   phoneCell: {
@@ -566,10 +467,7 @@ const styles = {
   },
 
   menu: {
-    position: "absolute",
-    right: 0,
-    top: 46,
-    minWidth: 160,
+    minWidth: 180,
     background: "#fff",
     border: "1px solid #e5e7eb",
     borderRadius: 14,
@@ -577,7 +475,7 @@ const styles = {
     display: "grid",
     gap: 4,
     boxShadow: "0 14px 30px rgba(15,23,42,0.12)",
-    zIndex: 20,
+    zIndex: 9999,
   },
 
   menuItem: {

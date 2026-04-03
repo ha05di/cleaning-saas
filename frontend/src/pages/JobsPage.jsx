@@ -3,6 +3,7 @@ import axios from "axios";
 import AppLayout from "../components/AppLayout";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../config";
+import JobEditDrawer from "./JobEditDrawer";
 
 const API = API_BASE_URL;
 
@@ -11,13 +12,46 @@ export default function JobsPage() {
   const navigate = useNavigate();
 
   const [jobs, setJobs] = useState([]);
+  const [cleaners, setCleaners] = useState([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [search, setSearch] = useState("");
 
+  const [menuState, setMenuState] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editingJob, setEditingJob] = useState(null);
+
   useEffect(() => {
     fetchJobs();
   }, [statusFilter, dateFilter]);
+
+  useEffect(() => {
+    fetchCleaners();
+  }, []);
+
+  useEffect(() => {
+    function handleWindowClick() {
+      setMenuState(null);
+    }
+
+    function handleWindowScroll() {
+      setMenuState(null);
+    }
+
+    function handleWindowResize() {
+      setMenuState(null);
+    }
+
+    document.addEventListener("click", handleWindowClick);
+    window.addEventListener("scroll", handleWindowScroll, true);
+    window.addEventListener("resize", handleWindowResize);
+
+    return () => {
+      document.removeEventListener("click", handleWindowClick);
+      window.removeEventListener("scroll", handleWindowScroll, true);
+      window.removeEventListener("resize", handleWindowResize);
+    };
+  }, []);
 
   async function fetchJobs() {
     try {
@@ -36,10 +70,82 @@ export default function JobsPage() {
     }
   }
 
+  async function fetchCleaners() {
+    try {
+      const res = await axios.get(`${API}/cleaners`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setCleaners(res.data.cleaners || []);
+    } catch (error) {
+      console.error("Failed to fetch cleaners", error);
+    }
+  }
+
   function clearFilters() {
     setStatusFilter("");
     setDateFilter("");
     setSearch("");
+  }
+
+  function openMenu(e, job) {
+    e.stopPropagation();
+
+    if (menuState?.id === job.id) {
+      setMenuState(null);
+      return;
+    }
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 190;
+    const menuHeight = 210;
+
+    let left = rect.right - menuWidth;
+    let top = rect.bottom + 8;
+
+    if (left < 12) left = 12;
+    if (left + menuWidth > window.innerWidth - 12) {
+      left = window.innerWidth - menuWidth - 12;
+    }
+
+    if (top + menuHeight > window.innerHeight - 12) {
+      top = rect.top - menuHeight - 8;
+    }
+
+    setMenuState({
+      id: job.id,
+      job,
+      top,
+      left,
+    });
+  }
+
+  async function updateStatus(jobId, status) {
+    try {
+      await axios.put(
+        `${API}/jobs/${jobId}/status`,
+        { status },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      setMenuState(null);
+      await fetchJobs();
+    } catch (error) {
+      alert(error?.response?.data?.error || "Failed to update status");
+    }
+  }
+
+  async function removeJob(jobId) {
+    const confirmed = window.confirm("Are you sure you want to delete this job?");
+    if (!confirmed) return;
+
+    try {
+      await axios.delete(`${API}/jobs/${jobId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMenuState(null);
+      await fetchJobs();
+    } catch (error) {
+      alert(error?.response?.data?.error || "Failed to delete job");
+    }
   }
 
   const filteredJobs = useMemo(() => {
@@ -50,16 +156,18 @@ export default function JobsPage() {
       const customerName = (job.customer?.name || "").toLowerCase();
       const cleanerName = (job.cleaner?.name || "").toLowerCase();
       const serviceType = (job.serviceType || "").toLowerCase();
+      const title = (job.title || "").toLowerCase();
       const status = (job.status || "").toLowerCase();
       const serviceTime = (job.serviceTime || "").toLowerCase();
       const orderNo = (job.orderNo || "").toLowerCase();
       const source = (job.source || "").toLowerCase();
-      const address = (job.customer?.address || "").toLowerCase();
+      const address = (job.address || job.customer?.address || "").toLowerCase();
 
       return (
         customerName.includes(q) ||
         cleanerName.includes(q) ||
         serviceType.includes(q) ||
+        title.includes(q) ||
         status.includes(q) ||
         serviceTime.includes(q) ||
         orderNo.includes(q) ||
@@ -112,6 +220,7 @@ export default function JobsPage() {
             <option value="pending">Pending</option>
             <option value="assigned">Assigned</option>
             <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
           </select>
 
           <input
@@ -140,7 +249,7 @@ export default function JobsPage() {
         <div style={styles.tableWrap}>
           <div style={styles.tableHeader}>
             <div>Client</div>
-            <div>Job number</div>
+            <div>Job Number</div>
             <div>Property</div>
             <div>Schedule</div>
             <div>Status</div>
@@ -175,13 +284,13 @@ export default function JobsPage() {
                     {job.orderNo || `JOB-${job.id}`}
                   </div>
                   <div style={styles.jobNumberSub}>
-                    {job.serviceType || "-"}
+                    {job.title || job.serviceType || "-"}
                   </div>
                 </div>
 
                 <div style={styles.propertyCell}>
                   <div style={styles.propertyText}>
-                    {job.customer?.address || "-"}
+                    {job.address || job.customer?.address || "-"}
                   </div>
                 </div>
 
@@ -195,23 +304,99 @@ export default function JobsPage() {
                 </div>
 
                 <div style={styles.statusCell}>
-                  <div style={getStatusBadge(job.status)}>{job.status}</div>
+                  <div style={getStatusBadge(job.status)}>
+                    {formatStatus(job.status)}
+                  </div>
                 </div>
 
                 <div
                   style={styles.actionsCell}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <ActionMenu
-                    job={job}
-                    refresh={fetchJobs}
-                    onOpen={() => navigate(`/jobs/${job.id}`)}
-                  />
+                  <button
+                    style={styles.menuBtn}
+                    onClick={(e) => openMenu(e, job)}
+                  >
+                    •••
+                  </button>
                 </div>
               </div>
             ))
           )}
         </div>
+
+        {menuState && (
+          <div
+            style={{
+              ...styles.menu,
+              position: "fixed",
+              top: menuState.top,
+              left: menuState.left,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              style={styles.menuItem}
+              onClick={() => {
+                setEditingJob(menuState.job);
+                setDrawerOpen(true);
+                setMenuState(null);
+              }}
+            >
+              Edit
+            </button>
+
+            <button
+              style={styles.menuItem}
+              onClick={() => {
+                navigate(`/jobs/${menuState.job.id}`);
+                setMenuState(null);
+              }}
+            >
+              Open
+            </button>
+
+            {menuState.job.status !== "assigned" && (
+              <button
+                style={styles.menuItem}
+                onClick={() => updateStatus(menuState.job.id, "assigned")}
+              >
+                Mark Assigned
+              </button>
+            )}
+
+            {menuState.job.status !== "completed" && (
+              <button
+                style={styles.menuItem}
+                onClick={() => updateStatus(menuState.job.id, "completed")}
+              >
+                Mark Completed
+              </button>
+            )}
+
+            <button
+              style={{ ...styles.menuItem, ...styles.menuDanger }}
+              onClick={() => removeJob(menuState.job.id)}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+
+        <JobEditDrawer
+          open={drawerOpen}
+          job={editingJob}
+          cleaners={cleaners}
+          onClose={() => {
+            setDrawerOpen(false);
+            setEditingJob(null);
+          }}
+          onSaved={async () => {
+            await fetchJobs();
+            setDrawerOpen(false);
+            setEditingJob(null);
+          }}
+        />
       </div>
     </AppLayout>
   );
@@ -226,92 +411,21 @@ function KpiCard({ label, value }) {
   );
 }
 
-function ActionMenu({ job, refresh, onOpen }) {
-  const token = localStorage.getItem("token");
-  const [open, setOpen] = useState(false);
-
-  async function updateStatus(status) {
-    try {
-      await axios.put(
-        `${API}/jobs/${job.id}/status`,
-        { status },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      refresh();
-      setOpen(false);
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to update status");
-    }
-  }
-
-  async function remove() {
-    const confirmed = window.confirm("Are you sure you want to delete this job?");
-    if (!confirmed) return;
-
-    try {
-      await axios.delete(`${API}/jobs/${job.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      refresh();
-      setOpen(false);
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to delete job");
-    }
-  }
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        style={styles.menuBtn}
-        onClick={() => setOpen((prev) => !prev)}
-      >
-        •••
-      </button>
-
-      {open && (
-        <div style={styles.menu}>
-          <button style={styles.menuItem} onClick={onOpen}>
-            Open
-          </button>
-
-          {job.status !== "assigned" && (
-            <button
-              style={styles.menuItem}
-              onClick={() => updateStatus("assigned")}
-            >
-              Mark Assigned
-            </button>
-          )}
-
-          {job.status !== "completed" && (
-            <button
-              style={styles.menuItem}
-              onClick={() => updateStatus("completed")}
-            >
-              Mark Completed
-            </button>
-          )}
-
-          <button
-            style={{ ...styles.menuItem, ...styles.menuDanger }}
-            onClick={remove}
-          >
-            Delete
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function formatDate(d) {
   if (!d) return "";
-  return d.split("T")[0];
+  const str = String(d);
+  return str.includes("T") ? str.split("T")[0] : str;
+}
+
+function formatStatus(status) {
+  const value = String(status || "").replaceAll("_", " ");
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function getStatusBadge(status) {
   if (status === "completed") return styles.greenBadge;
   if (status === "assigned") return styles.blueBadge;
+  if (status === "cancelled") return styles.redBadge;
   return styles.grayBadge;
 }
 
@@ -401,6 +515,8 @@ const styles = {
     minWidth: 0,
     fontSize: 14,
     outline: "none",
+    width: "100%",
+    boxSizing: "border-box",
   },
 
   secondaryBtn: {
@@ -529,10 +645,7 @@ const styles = {
   },
 
   menu: {
-    position: "absolute",
-    right: 0,
-    top: 46,
-    minWidth: 180,
+    minWidth: 190,
     background: "#fff",
     border: "1px solid #e5e7eb",
     borderRadius: 14,
@@ -540,7 +653,7 @@ const styles = {
     display: "grid",
     gap: 4,
     boxShadow: "0 14px 30px rgba(15,23,42,0.12)",
-    zIndex: 20,
+    zIndex: 9999,
   },
 
   menuItem: {
@@ -567,7 +680,6 @@ const styles = {
     padding: "6px 12px",
     fontSize: 12,
     fontWeight: 800,
-    textTransform: "capitalize",
     whiteSpace: "nowrap",
     width: "fit-content",
   },
@@ -580,7 +692,18 @@ const styles = {
     padding: "6px 12px",
     fontSize: 12,
     fontWeight: 800,
-    textTransform: "capitalize",
+    whiteSpace: "nowrap",
+    width: "fit-content",
+  },
+
+  redBadge: {
+    background: "#fee2e2",
+    color: "#dc2626",
+    border: "1px solid #fecaca",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 800,
     whiteSpace: "nowrap",
     width: "fit-content",
   },
@@ -593,7 +716,6 @@ const styles = {
     padding: "6px 12px",
     fontSize: 12,
     fontWeight: 800,
-    textTransform: "capitalize",
     whiteSpace: "nowrap",
     width: "fit-content",
   },
