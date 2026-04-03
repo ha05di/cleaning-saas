@@ -3,6 +3,8 @@ import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import { API_BASE_URL } from "../config";
+import { useCompany } from "../context/CompanyContext";
+import { formatDateForDisplay } from "../utils/time";
 
 const API = API_BASE_URL;
 
@@ -10,6 +12,7 @@ export default function JobDetailPage() {
   const token = localStorage.getItem("token");
   const { id } = useParams();
   const navigate = useNavigate();
+  const { timezone } = useCompany();
 
   const [job, setJob] = useState(null);
   const [cleaners, setCleaners] = useState([]);
@@ -137,13 +140,13 @@ export default function JobDetailPage() {
       customerName: job.customer?.name || "Unknown Customer",
       address: job.address || job.customer?.address || "-",
       phone: job.customer?.phone || "-",
-      startDate: formatDate(job.serviceDate),
-      endDate: formatDate(job.endDate || job.serviceDate),
+      startDate: formatDateForDisplay(job.serviceDate, timezone),
+      endDate: formatDateForDisplay(job.endDate || job.serviceDate, timezone),
       assignedCleaner: job.cleaner?.name || "Unassigned",
       notes: job.notes || job.instructions || "",
       jobType: job.serviceType || "One-off job",
     };
-  }, [job]);
+  }, [job, timezone]);
 
   if (loading) {
     return (
@@ -522,18 +525,6 @@ function ProfitItem({ label, value }) {
 
 function getInitial(name = "") {
   return name.trim()?.charAt(0)?.toUpperCase() || "C";
-}
-
-function formatDate(dateString) {
-  if (!dateString) return "-";
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return String(dateString);
-
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-  });
 }
 
 function getVisitStatusBadge(status) {

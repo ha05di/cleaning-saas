@@ -13,6 +13,8 @@ import LandingPage from "./pages/LandingPage";
 import { useAuth } from "./context/AuthContext";
 import NewJobPage from "./pages/NewJobPage";
 import NewCustomerPage from "./pages/NewCustomerPage";
+import CompanySettingsPage from "./pages/CompanySettingsPage";
+import { CompanyProvider } from "./context/CompanyContext";
 
 function PrivateRoute({ children }) {
   const { session, loading } = useAuth();
@@ -26,7 +28,8 @@ function PrivateRoute({ children }) {
 
 export default function App() {
   return (
-    <Routes>
+    <CompanyProvider>
+      <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignupPage />} />
@@ -123,6 +126,15 @@ export default function App() {
           </PrivateRoute>
         }
       />
-    </Routes>
+      <Route
+        path="/settings/company"
+        element={
+          <PrivateRoute>
+            <CompanySettingsPage />
+          </PrivateRoute>
+        }
+      />
+      </Routes>
+    </CompanyProvider>
   );
 }

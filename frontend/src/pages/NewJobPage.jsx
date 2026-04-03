@@ -1,18 +1,41 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import AppLayout from "../components/AppLayout";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../config";
+import { useCompany } from "../context/CompanyContext";
+import {
+  getTodayKeyInTimeZone,
+  getHourInTimeZone,
+  normalizeFirstDayOfWeek,
+} from "../utils/time";
 
 const API = API_BASE_URL;
+
+function getSuggestedTime(timezone) {
+  const hour = getHourInTimeZone(new Date(), timezone);
+
+  if (hour < 8) return "09:00";
+  if (hour >= 18) return "09:00";
+
+  const nextHour = Math.min(hour + 1, 18);
+  return `${String(nextHour).padStart(2, "0")}:00`;
+}
 
 export default function NewJobPage() {
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
+  const {
+    company,
+    timezone,
+    firstDayOfWeek,
+    loading: companyLoading,
+  } = useCompany();
 
   const [customers, setCustomers] = useState([]);
   const [cleaners, setCleaners] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [bootstrappedDefaults, setBootstrappedDefaults] = useState(false);
 
   const [form, setForm] = useState({
     customerId: "",
@@ -26,7 +49,19 @@ export default function NewJobPage() {
   useEffect(() => {
     fetchCustomers();
     fetchCleaners();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (companyLoading || bootstrappedDefaults) return;
+
+    setForm((prev) => ({
+      ...prev,
+      serviceDate: prev.serviceDate || getTodayKeyInTimeZone(timezone),
+      serviceTime: prev.serviceTime || getSuggestedTime(timezone),
+    }));
+    setBootstrappedDefaults(true);
+  }, [companyLoading, bootstrappedDefaults, timezone]);
 
   async function fetchCustomers() {
     try {
@@ -51,9 +86,17 @@ export default function NewJobPage() {
   }
 
   function handleChange(e) {
+    const { name, value } = e.target;
     setForm((prev) => ({
       ...prev,
-      [e.target.name]: e.target.value,
+      [name]: value,
+    }));
+  }
+
+  function applySuggestedTime() {
+    setForm((prev) => ({
+      ...prev,
+      serviceTime: getSuggestedTime(timezone),
     }));
   }
 
@@ -91,20 +134,33 @@ export default function NewJobPage() {
     }
   }
 
+  const companyLabel = useMemo(() => {
+    return company?.companyName || "Your company";
+  }, [company]);
+
+  const firstDayLabel = useMemo(() => {
+    return normalizeFirstDayOfWeek(firstDayOfWeek);
+  }, [firstDayOfWeek]);
+
   return (
     <AppLayout title="New Job">
       <div style={styles.page}>
         <div style={styles.topBar}>
           <div>
             <h1 style={styles.title}>New Job</h1>
-            <div style={styles.subtitle}>
-              Create a new customer booking.
-            </div>
+            <div style={styles.subtitle}>Create a new customer booking.</div>
           </div>
 
           <button style={styles.backBtn} onClick={() => navigate("/jobs")}>
             ← Back to Jobs
           </button>
+        </div>
+
+        <div style={styles.infoBanner}>
+          <div style={styles.infoTitle}>{companyLabel}</div>
+          <div style={styles.infoText}>
+            Defaults use <strong>{timezone}</strong>. Week starts on <strong>{firstDayLabel}</strong>.
+          </div>
         </div>
 
         <form onSubmit={handleSubmit} style={styles.formWrap}>
@@ -157,13 +213,25 @@ export default function NewJobPage() {
 
               <div style={styles.field}>
                 <label style={styles.label}>Time</label>
-                <input
-                  name="serviceTime"
-                  value={form.serviceTime}
-                  onChange={handleChange}
-                  placeholder="e.g. 3PM"
-                  style={styles.input}
-                />
+                <div style={styles.timeRow}>
+                  <input
+                    type="time"
+                    name="serviceTime"
+                    value={form.serviceTime}
+                    onChange={handleChange}
+                    style={styles.input}
+                  />
+                  <button
+                    type="button"
+                    style={styles.smallActionBtn}
+                    onClick={applySuggestedTime}
+                  >
+                    Auto
+                  </button>
+                </div>
+                <div style={styles.helperText}>
+                  Suggested time follows company timezone.
+                </div>
               </div>
             </div>
           </div>
@@ -198,7 +266,7 @@ export default function NewJobPage() {
                 name="notes"
                 value={form.notes}
                 onChange={handleChange}
-                placeholder="Add internal notes for this job..."
+                placeholder="Add internal notes for this job."
                 style={styles.textarea}
               />
             </div>
@@ -228,7 +296,6 @@ const styles = {
     display: "grid",
     gap: 20,
   },
-
   topBar: {
     display: "flex",
     justifyContent: "space-between",
@@ -236,7 +303,6 @@ const styles = {
     gap: 12,
     flexWrap: "wrap",
   },
-
   title: {
     margin: 0,
     fontSize: 32,
@@ -245,107 +311,130 @@ const styles = {
     color: "#0f172a",
     letterSpacing: "-0.03em",
   },
-
   subtitle: {
-    marginTop: 6,
-    color: "#6b7280",
-    fontSize: 14,
+    marginTop: 8,
+    color: "#64748b",
+    fontSize: 15,
   },
-
   backBtn: {
-    padding: "12px 14px",
-    border: "1px solid #d1d5db",
-    borderRadius: 12,
+    border: "1px solid #cbd5e1",
     background: "#fff",
-    cursor: "pointer",
+    color: "#0f172a",
+    borderRadius: 12,
+    padding: "10px 14px",
     fontWeight: 700,
+    cursor: "pointer",
+  },
+  infoBanner: {
+    border: "1px solid #dbeafe",
+    background: "#eff6ff",
+    borderRadius: 18,
+    padding: 16,
+  },
+  infoTitle: {
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: 6,
+  },
+  infoText: {
+    color: "#475569",
     fontSize: 14,
   },
-
   formWrap: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: 20,
-    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
-    overflow: "hidden",
+    display: "grid",
+    gap: 18,
   },
-
   section: {
-    padding: 22,
-    borderBottom: "1px solid #eef2f7",
+    background: "#fff",
+    border: "1px solid #e2e8f0",
+    borderRadius: 20,
+    padding: 20,
+    boxShadow: "0 6px 20px rgba(15,23,42,0.04)",
   },
-
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: 800,
-    color: "#111827",
+    color: "#0f172a",
     marginBottom: 16,
   },
-
   sectionGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
     gap: 16,
   },
-
   field: {
     display: "grid",
     gap: 8,
   },
-
   label: {
     fontSize: 13,
     fontWeight: 700,
-    color: "#475569",
+    color: "#334155",
   },
-
   input: {
-    padding: "13px 14px",
+    width: "100%",
+    border: "1px solid #cbd5e1",
     borderRadius: 12,
-    border: "1px solid #d1d5db",
-    background: "#fff",
-    minWidth: 0,
+    padding: "12px 14px",
     fontSize: 14,
-    outline: "none",
+    color: "#0f172a",
+    boxSizing: "border-box",
+    background: "#fff",
   },
-
+  timeRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr auto",
+    gap: 10,
+    alignItems: "center",
+  },
+  smallActionBtn: {
+    border: "1px solid #bfdbfe",
+    background: "#dbeafe",
+    color: "#1d4ed8",
+    borderRadius: 12,
+    padding: "12px 14px",
+    fontWeight: 700,
+    cursor: "pointer",
+  },
+  helperText: {
+    color: "#64748b",
+    fontSize: 12,
+  },
   textarea: {
-    minHeight: 120,
-    padding: "13px 14px",
+    minHeight: 110,
+    width: "100%",
+    border: "1px solid #cbd5e1",
     borderRadius: 12,
-    border: "1px solid #d1d5db",
-    background: "#fff",
+    padding: "12px 14px",
     fontSize: 14,
+    color: "#0f172a",
+    boxSizing: "border-box",
     resize: "vertical",
-    outline: "none",
+    fontFamily: "inherit",
   },
-
   footerActions: {
-    padding: 22,
     display: "flex",
     justifyContent: "flex-end",
     gap: 12,
-    background: "#fcfcfd",
+    flexWrap: "wrap",
   },
-
-  primaryBtn: {
-    padding: "12px 16px",
-    border: "none",
-    borderRadius: 12,
-    background: "#0f172a",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: 800,
-    fontSize: 14,
-  },
-
   secondaryBtn: {
-    padding: "12px 16px",
-    border: "1px solid #d1d5db",
-    borderRadius: 12,
+    border: "1px solid #cbd5e1",
     background: "#fff",
+    color: "#0f172a",
+    borderRadius: 14,
+    padding: "12px 18px",
+    fontWeight: 800,
     cursor: "pointer",
-    fontWeight: 700,
-    fontSize: 14,
+  },
+  primaryBtn: {
+    border: "none",
+    background: "#2563eb",
+    color: "#fff",
+    borderRadius: 14,
+    padding: "12px 18px",
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(37,99,235,0.18)",
   },
 };

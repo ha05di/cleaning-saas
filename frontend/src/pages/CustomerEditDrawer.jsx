@@ -36,22 +36,21 @@ export default function CustomerEditDrawer({
   useEffect(() => {
     if (!open || !customer) return;
 
-    const parsed = splitName(customer.name || "");
-    const parsedAddress = parseAddress(customer);
+    const parsed = splitName(customer);
 
     setForm({
-      title: "",
-      firstName: parsed.firstName,
-      lastName: parsed.lastName,
+      title: customer.title || "",
+      firstName: customer.firstName || parsed.firstName,
+      lastName: customer.lastName || parsed.lastName,
       companyName: customer.companyName || "",
-      role: "",
+      role: customer.role || "",
       phone: customer.phone || "",
       email: customer.email || "",
       leadSource: customer.leadSource || "",
-      street1: customer.street1 || parsedAddress.street1 || "",
-      street2: customer.street2 || parsedAddress.street2 || "",
-      city: customer.city || parsedAddress.city || "",
-      province: customer.province || "",
+      street1: customer.street1 || "",
+      street2: customer.street2 || "",
+      city: customer.city || "",
+      province: customer.province || customer.state || "",
       postalCode: customer.postalCode || "",
       country: customer.country || "Malaysia",
       notes: customer.notes || "",
@@ -82,15 +81,19 @@ export default function CustomerEditDrawer({
     }));
   }
 
-  const finalName = useMemo(() => {
-    const companyName = form.companyName.trim();
-    const personName = [form.firstName, form.lastName]
+  const personName = useMemo(() => {
+    return [form.firstName, form.lastName]
       .map((v) => v.trim())
       .filter(Boolean)
       .join(" ");
+  }, [form.firstName, form.lastName]);
 
-    return companyName || personName;
-  }, [form.companyName, form.firstName, form.lastName]);
+  const finalName = useMemo(() => {
+    const person = personName.trim();
+    const companyName = form.companyName.trim();
+
+    return person || companyName;
+  }, [personName, form.companyName]);
 
   const finalAddress = useMemo(() => {
     return [
@@ -116,7 +119,7 @@ export default function CustomerEditDrawer({
     if (!customer?.id) return;
 
     if (!finalName.trim()) {
-      alert("Please enter a customer name or company name.");
+      alert("Please enter a full name or company name.");
       return;
     }
 
@@ -127,15 +130,20 @@ export default function CustomerEditDrawer({
         `${API}/customers/${customer.id}`,
         {
           name: finalName,
+          firstName: form.firstName.trim(),
+          lastName: form.lastName.trim(),
+          title: form.title.trim(),
           phone: form.phone.trim(),
           email: form.email.trim(),
           companyName: form.companyName.trim(),
+          role: form.role.trim(),
           leadSource: form.leadSource.trim(),
           address: finalAddress,
           street1: form.street1.trim(),
           street2: form.street2.trim(),
           city: form.city.trim(),
           province: form.province.trim(),
+          state: form.province.trim(),
           postalCode: form.postalCode.trim(),
           country: form.country.trim(),
           notes: form.notes.trim(),
@@ -221,6 +229,11 @@ export default function CustomerEditDrawer({
               placeholder="Role"
               style={styles.input}
             />
+
+            <div style={styles.previewBox}>
+              <div style={styles.previewLabel}>Saved customer name</div>
+              <div style={styles.previewValue}>{finalName || "-"}</div>
+            </div>
           </section>
 
           <section style={styles.section}>
@@ -311,32 +324,42 @@ export default function CustomerEditDrawer({
                 style={styles.input}
               >
                 <option value="Malaysia">Malaysia</option>
+                <option value="Singapore">Singapore</option>
                 <option value="Australia">Australia</option>
                 <option value="United States">United States</option>
-                <option value="Singapore">Singapore</option>
               </select>
             </div>
           </section>
 
           <section style={styles.section}>
-            <h3 style={styles.sectionTitle}>Additional client details</h3>
+            <h3 style={styles.sectionTitle}>Notes</h3>
 
             <textarea
               name="notes"
               value={form.notes}
               onChange={handleChange}
-              placeholder="Add notes"
+              placeholder="Internal notes"
               rows={5}
-              style={styles.textarea}
+              style={{ ...styles.input, ...styles.textarea }}
             />
           </section>
 
           <div style={styles.footer}>
-            <button type="button" onClick={onClose} style={styles.cancelBtn}>
+            <button
+              type="button"
+              style={styles.cancelBtn}
+              onClick={onClose}
+              disabled={saving}
+            >
               Cancel
             </button>
-            <button type="submit" style={styles.saveBtn} disabled={saving}>
-              {saving ? "Updating..." : "Update Client"}
+
+            <button
+              type="submit"
+              style={styles.saveBtn}
+              disabled={saving}
+            >
+              {saving ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </form>
@@ -345,8 +368,29 @@ export default function CustomerEditDrawer({
   );
 }
 
-function splitName(name) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
+function splitName(customer) {
+  const first = (customer?.firstName || "").trim();
+  const last = (customer?.lastName || "").trim();
+
+  if (first || last) {
+    return {
+      firstName: first,
+      lastName: last,
+    };
+  }
+
+  const rawName = (customer?.name || "").trim();
+  const company = (customer?.companyName || "").trim();
+
+  if (!rawName || (company && rawName.toLowerCase() === company.toLowerCase())) {
+    return {
+      firstName: "",
+      lastName: "",
+    };
+  }
+
+  const parts = rawName.split(/\s+/).filter(Boolean);
+
   if (parts.length <= 1) {
     return {
       firstName: parts[0] || "",
@@ -356,18 +400,7 @@ function splitName(name) {
 
   return {
     firstName: parts.slice(0, -1).join(" "),
-    lastName: parts.slice(-1).join(""),
-  };
-}
-
-function parseAddress(customer) {
-  const address = customer?.address || "";
-  const parts = address.split("|").map((p) => p.trim());
-
-  return {
-    street1: parts[0] || "",
-    street2: parts[1] || "",
-    city: "",
+    lastName: parts.slice(-1).join(" "),
   };
 }
 
@@ -376,18 +409,18 @@ const styles = {
     position: "fixed",
     inset: 0,
     background: "rgba(15, 23, 42, 0.28)",
-    zIndex: 9998,
+    zIndex: 80,
   },
 
   drawer: {
     position: "fixed",
     top: 0,
     right: 0,
+    width: "min(760px, 100vw)",
     height: "100vh",
-    width: "min(640px, 100vw)",
-    background: "#fff",
-    boxShadow: "-20px 0 50px rgba(15,23,42,0.16)",
-    zIndex: 9999,
+    background: "#ffffff",
+    zIndex: 81,
+    boxShadow: "-24px 0 60px rgba(15,23,42,0.18)",
     display: "flex",
     flexDirection: "column",
   },
@@ -396,124 +429,140 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    padding: "28px 28px 18px",
+    padding: "22px 24px",
     borderBottom: "1px solid #e5e7eb",
-    flexShrink: 0,
   },
 
   drawerTitle: {
     margin: 0,
-    fontSize: 22,
-    fontWeight: 850,
+    fontSize: 24,
+    fontWeight: 900,
     color: "#0f172a",
   },
 
   closeBtn: {
-    border: "none",
-    background: "transparent",
-    fontSize: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    border: "1px solid #d1d5db",
+    background: "#fff",
     cursor: "pointer",
-    color: "#475569",
-    lineHeight: 1,
+    fontSize: 18,
   },
 
   form: {
-    padding: 28,
+    padding: 24,
     overflowY: "auto",
     display: "grid",
-    gap: 28,
+    gap: 18,
   },
 
   section: {
     display: "grid",
     gap: 14,
+    padding: 18,
+    border: "1px solid #e5e7eb",
+    borderRadius: 20,
+    background: "#ffffff",
   },
 
   sectionTitle: {
     margin: 0,
-    fontSize: 17,
-    fontWeight: 800,
+    fontSize: 18,
+    fontWeight: 900,
     color: "#0f172a",
   },
 
   sectionText: {
     margin: 0,
     fontSize: 14,
-    lineHeight: 1.5,
     color: "#64748b",
+    lineHeight: 1.7,
   },
 
   row3: {
     display: "grid",
-    gridTemplateColumns: "120px 1fr 1fr",
-    gap: 0,
-    border: "1px solid #d1d5db",
-    borderRadius: 12,
-    overflow: "hidden",
+    gridTemplateColumns: "140px 1fr 1fr",
+    gap: 12,
   },
 
   row2: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: 0,
-    border: "1px solid #d1d5db",
-    borderRadius: 12,
-    overflow: "hidden",
+    gap: 12,
   },
 
   input: {
     width: "100%",
-    minHeight: 50,
-    padding: "12px 14px",
-    border: "1px solid #d1d5db",
+    height: 46,
+    padding: "0 14px",
+    borderRadius: 14,
+    border: "1px solid #dbe2ea",
     background: "#fff",
-    fontSize: 15,
-    color: "#111827",
-    outline: "none",
+    color: "#0f172a",
+    fontSize: 14,
     boxSizing: "border-box",
+    outline: "none",
   },
 
   textarea: {
-    width: "100%",
-    minHeight: 110,
-    padding: "14px",
-    border: "1px solid #d1d5db",
-    borderRadius: 12,
-    background: "#fff",
-    fontSize: 15,
-    color: "#111827",
-    outline: "none",
+    height: "auto",
+    minHeight: 120,
+    padding: 14,
     resize: "vertical",
-    boxSizing: "border-box",
-    fontFamily: "inherit",
+  },
+
+  previewBox: {
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    padding: 14,
+  },
+
+  previewLabel: {
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    marginBottom: 8,
+  },
+
+  previewValue: {
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#0f172a",
+    lineHeight: 1.4,
+    wordBreak: "break-word",
   },
 
   footer: {
     display: "flex",
     justifyContent: "flex-end",
     gap: 12,
-    paddingTop: 8,
+    paddingBottom: 8,
   },
 
   cancelBtn: {
+    padding: "12px 18px",
     border: "1px solid #d1d5db",
+    borderRadius: 14,
     background: "#fff",
     color: "#111827",
-    borderRadius: 12,
-    padding: "12px 18px",
-    fontSize: 15,
     fontWeight: 700,
+    fontSize: 14,
     cursor: "pointer",
   },
 
   saveBtn: {
-    border: "none",
-    background: "#2f7d1f",
-    color: "#fff",
-    borderRadius: 12,
     padding: "12px 18px",
-    fontSize: 15,
+    border: "none",
+    borderRadius: 14,
+    background: "#2563eb",
+    color: "#fff",
     fontWeight: 800,
+    fontSize: 14,
     cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(37,99,235,0.18)",
   },
 };

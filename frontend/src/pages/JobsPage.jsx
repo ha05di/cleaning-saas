@@ -4,12 +4,15 @@ import AppLayout from "../components/AppLayout";
 import { useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../config";
 import JobEditDrawer from "./JobEditDrawer";
+import { useCompany } from "../context/CompanyContext";
+import { compareJobsBySchedule, formatDateForDisplay, getDateKeyInTimeZone } from "../utils/time";
 
 const API = API_BASE_URL;
 
 export default function JobsPage() {
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
+  const { timezone } = useCompany();
 
   const [jobs, setJobs] = useState([]);
   const [cleaners, setCleaners] = useState([]);
@@ -57,7 +60,6 @@ export default function JobsPage() {
     try {
       const params = {};
       if (statusFilter) params.status = statusFilter;
-      if (dateFilter) params.date = dateFilter;
 
       const res = await axios.get(`${API}/jobs`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -149,10 +151,16 @@ export default function JobsPage() {
   }
 
   const filteredJobs = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return jobs;
+    let result = [...jobs];
 
-    return jobs.filter((job) => {
+    if (dateFilter) {
+      result = result.filter((job) => getDateKeyInTimeZone(job.serviceDate, timezone) === dateFilter);
+    }
+
+    const q = search.trim().toLowerCase();
+    if (!q) return result.sort((a, b) => compareJobsBySchedule(a, b, timezone));
+
+    return result.filter((job) => {
       const customerName = (job.customer?.name || "").toLowerCase();
       const cleanerName = (job.cleaner?.name || "").toLowerCase();
       const serviceType = (job.serviceType || "").toLowerCase();
@@ -174,8 +182,8 @@ export default function JobsPage() {
         source.includes(q) ||
         address.includes(q)
       );
-    });
-  }, [jobs, search]);
+    }).sort((a, b) => compareJobsBySchedule(a, b, timezone));
+  }, [jobs, search, dateFilter, timezone]);
 
   const stats = {
     total: jobs.length,
@@ -296,7 +304,7 @@ export default function JobsPage() {
 
                 <div style={styles.scheduleCell}>
                   <div style={styles.scheduleMain}>
-                    {formatDate(job.serviceDate)}
+                    {formatDateForDisplay(job.serviceDate, timezone)}
                   </div>
                   <div style={styles.scheduleSub}>
                     {job.serviceTime || "-"}
@@ -409,12 +417,6 @@ function KpiCard({ label, value }) {
       <div style={styles.kpiValue}>{value}</div>
     </div>
   );
-}
-
-function formatDate(d) {
-  if (!d) return "";
-  const str = String(d);
-  return str.includes("T") ? str.split("T")[0] : str;
 }
 
 function formatStatus(status) {

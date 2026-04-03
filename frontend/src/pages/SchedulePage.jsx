@@ -3,22 +3,34 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import { API_BASE_URL } from "../config";
+import { useCompany } from "../context/CompanyContext";
 
 const API = API_BASE_URL;
 
 const START_HOUR = 0;
 const END_HOUR = 23;
-const HOUR_ROW_HEIGHT = 72;
+const HOUR_ROW_HEIGHT = 56;
+const DEFAULT_DURATION_MINUTES = 120;
 
 export default function SchedulePage() {
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
+
+  const {
+    timezone: rawCompanyTimezone,
+    firstDayOfWeek: rawFirstDayOfWeek,
+  } = useCompany();
+
+  const companyTimezone = getSafeTimeZone(rawCompanyTimezone);
+  const companyFirstDayOfWeek = normalizeFirstDayOfWeek(rawFirstDayOfWeek);
 
   const [jobs, setJobs] = useState([]);
   const [cleaners, setCleaners] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const [currentDate, setCurrentDate] = useState(new Date());
+  const [view, setView] = useState("week"); // month | week | day
+
   const [selectedTeam, setSelectedTeam] = useState("All");
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [selectedCleanerId, setSelectedCleanerId] = useState("All");
@@ -33,9 +45,11 @@ export default function SchedulePage() {
 
   const [jobPopover, setJobPopover] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [updatingCleaner, setUpdatingCleaner] = useState(false);
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function fetchData() {
@@ -51,8 +65,12 @@ export default function SchedulePage() {
         }),
       ]);
 
-      setJobs(jobsRes.data.jobs || []);
-      setCleaners(cleanersRes.data.cleaners || []);
+      setJobs(Array.isArray(jobsRes?.data?.jobs) ? jobsRes.data.jobs : []);
+      setCleaners(
+        Array.isArray(cleanersRes?.data?.cleaners)
+          ? cleanersRes.data.cleaners
+          : []
+      );
     } catch (error) {
       console.error("Failed to fetch schedule data:", error);
       alert(error?.response?.data?.error || "Failed to fetch schedule");
@@ -109,6 +127,20 @@ export default function SchedulePage() {
     }
   }
 
+  async function handleCleanerSelect(job, cleanerId) {
+    if (!job?.id || !cleanerId) return;
+
+    const cleaner = cleaners.find((c) => String(c.id) === String(cleanerId));
+    if (!cleaner) return;
+
+    try {
+      setUpdatingCleaner(true);
+      await handleDropOnCleaner(cleaner, job.id);
+    } finally {
+      setUpdatingCleaner(false);
+    }
+  }
+
   async function handleSaveEdit() {
     if (!editingJob) return;
 
@@ -138,6 +170,8 @@ export default function SchedulePage() {
 
       await fetchData();
       setEditingJob(null);
+      setJobPopover(null);
+      setSelectedJob(null);
     } catch (error) {
       console.error("Failed to save edited job:", error);
       alert(error?.response?.data?.error || "Failed to save job changes");
@@ -172,7 +206,6 @@ export default function SchedulePage() {
       await fetchData();
 
       setSelectedJob(updatedJob);
-
       setJobPopover((prev) =>
         prev
           ? {
@@ -206,6 +239,8 @@ export default function SchedulePage() {
   }
 
   function openJobPopover(e, job) {
+    if (!e?.currentTarget) return;
+
     const rect = e.currentTarget.getBoundingClientRect();
     const popoverWidth = 380;
     const gap = 12;
@@ -217,6 +252,7 @@ export default function SchedulePage() {
       left = rect.left + window.scrollX - popoverWidth - gap;
     }
 
+    if (left < 12) left = 12;
     if (top < 20) top = 20;
 
     setSelectedJob(job);
@@ -227,7 +263,22 @@ export default function SchedulePage() {
     });
   }
 
-  const weekDays = useMemo(() => getWeekDays(currentDate), [currentDate]);
+  const weekDays = useMemo(
+    () => getWeekDays(currentDate, companyFirstDayOfWeek),
+    [currentDate, companyFirstDayOfWeek]
+  );
+
+  const monthGrid = useMemo(
+    () => getMonthGrid(currentDate, companyFirstDayOfWeek),
+    [currentDate, companyFirstDayOfWeek]
+  );
+
+  const dayViewDate = useMemo(() => stripTime(currentDate), [currentDate]);
+
+  const weekdayHeaders = useMemo(
+    () => getWeekdayHeaders(companyFirstDayOfWeek),
+    [companyFirstDayOfWeek]
+  );
 
   const teamOptions = useMemo(() => {
     const set = new Set();
@@ -254,17 +305,15 @@ export default function SchedulePage() {
     });
   }, [jobs, selectedTeam, selectedStatus, selectedCleanerId]);
 
-  const jobsByDay = useMemo(() => {
+  const jobsByDate = useMemo(() => {
     const map = {};
-    weekDays.forEach((day) => {
-      map[day.key] = [];
-    });
 
     filteredJobs.forEach((job) => {
       const dayKey = formatDate(job.serviceDate);
-      if (map[dayKey]) {
-        map[dayKey].push(job);
-      }
+      if (!dayKey) return;
+
+      if (!map[dayKey]) map[dayKey] = [];
+      map[dayKey].push(job);
     });
 
     Object.keys(map).forEach((key) => {
@@ -276,7 +325,20 @@ export default function SchedulePage() {
     });
 
     return map;
-  }, [filteredJobs, weekDays]);
+  }, [filteredJobs]);
+
+  const jobsByDay = useMemo(() => {
+    const map = {};
+    weekDays.forEach((day) => {
+      map[day.key] = jobsByDate[day.key] || [];
+    });
+    return map;
+  }, [weekDays, jobsByDate]);
+
+  const dayJobs = useMemo(() => {
+    const key = formatDate(dayViewDate);
+    return jobsByDate[key] || [];
+  }, [dayViewDate, jobsByDate]);
 
   const unscheduledJobs = useMemo(() => {
     return filteredJobs.filter((job) => {
@@ -296,19 +358,58 @@ export default function SchedulePage() {
     });
   }, [filteredJobs]);
 
-  const selectedJobCleanerCandidates = useMemo(() => {
-    if (!selectedJob) return cleaners;
-    return cleaners;
-  }, [selectedJob, cleaners]);
-
-  const editCleanerCandidates = useMemo(() => {
-    if (!editingJob) return cleaners;
-    return cleaners;
-  }, [editingJob, cleaners]);
-
   const totalWeekJobs = useMemo(() => {
     return Object.values(jobsByDay).reduce((sum, arr) => sum + arr.length, 0);
   }, [jobsByDay]);
+
+  const totalMonthJobs = useMemo(() => {
+    const monthStart = startOfMonth(currentDate);
+    const monthEnd = endOfMonth(currentDate);
+
+    return filteredJobs.filter((job) => {
+      const d = parseDateOnly(job.serviceDate);
+      if (!d) return false;
+      return d >= monthStart && d <= monthEnd;
+    }).length;
+  }, [filteredJobs, currentDate]);
+
+  const currentTitle = useMemo(() => {
+    if (view === "month") {
+      return formatMonthYear(currentDate, companyTimezone);
+    }
+    if (view === "week") {
+      return formatWeekRangeLabel(weekDays, companyTimezone);
+    }
+    return formatLongDate(dayViewDate, companyTimezone);
+  }, [view, currentDate, companyTimezone, weekDays, dayViewDate]);
+
+  function goPrev() {
+    if (view === "month") {
+      setCurrentDate(addMonths(currentDate, -1));
+      return;
+    }
+    if (view === "day") {
+      setCurrentDate(addDays(currentDate, -1));
+      return;
+    }
+    setCurrentDate(addDays(currentDate, -7));
+  }
+
+  function goNext() {
+    if (view === "month") {
+      setCurrentDate(addMonths(currentDate, 1));
+      return;
+    }
+    if (view === "day") {
+      setCurrentDate(addDays(currentDate, 1));
+      return;
+    }
+    setCurrentDate(addDays(currentDate, 7));
+  }
+
+  function goToday() {
+    setCurrentDate(new Date());
+  }
 
   return (
     <AppLayout title="Schedule">
@@ -320,31 +421,21 @@ export default function SchedulePage() {
             <div style={styles.topBar}>
               <div style={styles.topBarLeft}>
                 <div style={styles.monthRow}>
-                  <h1 style={styles.monthTitle}>{formatMonthYear(currentDate)}</h1>
+                  <h1 style={styles.monthTitle}>{currentTitle || "Schedule"}</h1>
+                  <div style={styles.subTitle}>
+                    Company timezone: {companyTimezone}
+                  </div>
                 </div>
               </div>
 
               <div style={styles.topBarRight}>
-                <button
-                  type="button"
-                  style={styles.navBtn}
-                  onClick={() => setCurrentDate(addDays(currentDate, -7))}
-                >
+                <button type="button" style={styles.navBtn} onClick={goPrev}>
                   ←
                 </button>
-                <button
-                  type="button"
-                  style={styles.navBtn}
-                  onClick={() => setCurrentDate(addDays(currentDate, 7))}
-                >
+                <button type="button" style={styles.navBtn} onClick={goNext}>
                   →
-
                 </button>
-                <button
-                  type="button"
-                  style={styles.todayBtn}
-                  onClick={() => setCurrentDate(new Date())}
-                >
+                <button type="button" style={styles.todayBtn} onClick={goToday}>
                   Today
                 </button>
                 <button
@@ -402,175 +493,75 @@ export default function SchedulePage() {
 
               <div style={styles.filterRight}>
                 <div style={styles.timezoneNotice}>
-                  Times shown are in your account&apos;s time zone
+                  Times shown are based on company settings
                 </div>
 
                 <div style={styles.viewSwitcher}>
-                  <button type="button" style={styles.viewBtnMuted}>
+                  <button
+                    type="button"
+                    style={view === "month" ? styles.viewBtnActive : styles.viewBtnMuted}
+                    onClick={() => setView("month")}
+                  >
                     Month
                   </button>
-                  <button type="button" style={styles.viewBtnActive}>
+                  <button
+                    type="button"
+                    style={view === "week" ? styles.viewBtnActive : styles.viewBtnMuted}
+                    onClick={() => setView("week")}
+                  >
                     Week
                   </button>
-                  <button type="button" style={styles.viewBtnMuted}>
+                  <button
+                    type="button"
+                    style={view === "day" ? styles.viewBtnActive : styles.viewBtnMuted}
+                    onClick={() => setView("day")}
+                  >
                     Day
                   </button>
                 </div>
               </div>
             </div>
 
-            {reassigning && (
-              <div style={styles.infoBar}>Reassigning job...</div>
-            )}
+            {reassigning && <div style={styles.infoBar}>Reassigning job...</div>}
 
             <div style={styles.scheduleLayout}>
               <div style={styles.calendarCard}>
-                <div style={styles.calendarHeader}>
-                  <div style={styles.timeHeaderSpacer} />
-                  {weekDays.map((day) => {
-                    const count = jobsByDay[day.key]?.length || 0;
-                    const isToday = day.key === formatDate(new Date());
+                {view === "month" && (
+                  <MonthView
+                    currentDate={currentDate}
+                    monthGrid={monthGrid}
+                    weekdayHeaders={weekdayHeaders}
+                    jobsByDate={jobsByDate}
+                    selectedJob={selectedJob}
+                    onOpenJob={openJobPopover}
+                    setCurrentDate={setCurrentDate}
+                    setView={setView}
+                  />
+                )}
 
-                    return (
-                      <div key={day.key} style={styles.dayHeaderCell}>
-                        <div
-                          style={{
-                            ...styles.dayBadge,
-                            ...(isToday ? styles.dayBadgeToday : {}),
-                          }}
-                        >
-                          {day.shortLabel}
-                        </div>
-                        <div style={styles.dayDateText}>{day.dayNumber}</div>
-                        <div style={styles.dayVisitText}>
-                          {count} visit{count === 1 ? "" : "s"}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                {view === "week" && (
+                  <WeekView
+                    weekDays={weekDays}
+                    jobsByDay={jobsByDay}
+                    selectedJob={selectedJob}
+                    draggingJobId={draggingJobId}
+                    dropTargetDay={dropTargetDay}
+                    setDropTargetDay={setDropTargetDay}
+                    setDraggingJobId={setDraggingJobId}
+                    onOpenJob={openJobPopover}
+                  />
+                )}
 
-                <div style={styles.calendarBody}>
-                  <div style={styles.timeColumn}>
-                    <div style={styles.anytimeLabel}>↓ Anytime</div>
-                    {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => {
-                      const hour = START_HOUR + i;
-                      return (
-                        <div
-                          key={hour}
-                          style={{
-                            ...styles.timeCell,
-                            height: HOUR_ROW_HEIGHT,
-                          }}
-                        >
-                          {formatHour(hour)}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div style={styles.daysGrid}>
-                    {weekDays.map((day) => {
-                      const isDropTarget = dropTargetDay === day.key;
-                      const dayJobs = jobsByDay[day.key] || [];
-                      const laidOutJobs = computeDayJobLayout(dayJobs);
-
-                      return (
-                        <div
-                          key={day.key}
-                          style={{
-                            ...styles.dayColumn,
-                            ...(isDropTarget ? styles.dayColumnActive : {}),
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            setDropTargetDay(day.key);
-                          }}
-                          onDragLeave={() => {
-                            if (dropTargetDay === day.key) setDropTargetDay("");
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            setDropTargetDay("");
-                          }}
-                        >
-                          {Array.from({ length: END_HOUR - START_HOUR + 1 }).map(
-                            (_, i) => (
-                              <div
-                                key={i}
-                                style={{
-                                  ...styles.gridHourRow,
-                                  height: HOUR_ROW_HEIGHT,
-                                }}
-                              />
-                            )
-                          )}
-
-                          {laidOutJobs.map((job) => {
-                            const top = getTopOffset(job.serviceTime);
-                            const blockHeight = getJobHeight(job);
-
-                            const columnsInGroup = job.__layout?.columnsInGroup || 1;
-                            const column = job.__layout?.column || 0;
-
-                            const widthPercent = 96 / columnsInGroup;
-                            const leftPercent = 2 + column * widthPercent;
-
-                            const isSelected =
-                              selectedJob && String(selectedJob.id) === String(job.id);
-
-                            return (
-                              <div
-                                key={job.id}
-                                draggable
-                                onDragStart={(e) => {
-                                  setDraggingJobId(job.id);
-                                  e.dataTransfer.setData("text/plain", String(job.id));
-                                }}
-                                onDragEnd={() => {
-                                  setDraggingJobId(null);
-                                  setDropTargetDay("");
-                                }}
-                                onClick={(e) => openJobPopover(e, job)}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.transform = "translateY(-2px)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.transform = "none";
-                                }}
-                                style={{
-                                  ...styles.jobBlock,
-                                  ...(draggingJobId === job.id
-                                    ? styles.jobBlockDragging
-                                    : {}),
-                                  ...getJobBlockStyle(job.status, isSelected),
-                                  top,
-                                  height: blockHeight,
-                                  width: `${widthPercent}%`,
-                                  left: `${leftPercent}%`,
-                                }}
-                              >
-                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                  {String(job.status || "").toLowerCase() === "completed" && (
-                                    <span style={{ fontSize: "12px" }}>✔</span>
-                                  )}
-                                  <div style={styles.jobBlockTitle}>
-                                    {job.customer?.name || "Unknown Customer"}
-                                    {job.serviceType ? ` - ${job.serviceType}` : ""}
-                                  </div>
-                                </div>
-
-                                <div style={styles.jobBlockTime}>
-                                  {job.serviceTime || "Anytime"}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                {view === "day" && (
+                  <DayView
+                    dayDate={dayViewDate}
+                    jobs={dayJobs}
+                    selectedJob={selectedJob}
+                    draggingJobId={draggingJobId}
+                    setDraggingJobId={setDraggingJobId}
+                    onOpenJob={openJobPopover}
+                  />
+                )}
               </div>
 
               <div style={styles.rightPanel}>
@@ -609,10 +600,22 @@ export default function SchedulePage() {
                 </div>
 
                 <div style={styles.placeholderCard}>
-                  <div style={styles.placeholderTitle}>Week Overview</div>
-                  <div style={styles.placeholderText}>
-                    {totalWeekJobs} scheduled jobs this week.
+                  <div style={styles.placeholderTitle}>
+                    {view === "month"
+                      ? "Month Overview"
+                      : view === "day"
+                      ? "Day Overview"
+                      : "Week Overview"}
                   </div>
+
+                  <div style={styles.placeholderText}>
+                    {view === "month"
+                      ? `${totalMonthJobs} scheduled jobs this month.`
+                      : view === "day"
+                      ? `${dayJobs.length} scheduled jobs this day.`
+                      : `${totalWeekJobs} scheduled jobs this week.`}
+                  </div>
+
                   <div style={styles.placeholderSub}>
                     Click any job block to open details.
                   </div>
@@ -683,40 +686,29 @@ export default function SchedulePage() {
 
                   <div style={styles.popoverSection}>
                     <div style={styles.popoverLabel}>Team</div>
-                    <div style={styles.assigneeWrap}>
-                      {selectedJobCleanerCandidates.map((cleaner) => {
-                        const isCurrent =
-                          String(
-                            jobPopover.job.cleaner?.id ||
-                              jobPopover.job.cleanerId ||
-                              ""
-                          ) === String(cleaner.id);
-
-                        return (
-                          <button
-                            key={cleaner.id}
-                            type="button"
-                            style={{
-                              ...styles.assigneeChip,
-                              ...(isCurrent ? styles.assigneeChipActive : {}),
-                            }}
-                            onClick={() =>
-                              handleDropOnCleaner(cleaner, jobPopover.job.id)
-                            }
-                          >
-                            {cleaner.name}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    <select
+                      style={styles.teamSelect}
+                      value={String(
+                        jobPopover.job.cleaner?.id || jobPopover.job.cleanerId || ""
+                      )}
+                      disabled={updatingCleaner}
+                      onChange={(e) =>
+                        handleCleanerSelect(jobPopover.job, e.target.value)
+                      }
+                    >
+                      <option value="">Select cleaner</option>
+                      {cleaners.map((cleaner) => (
+                        <option key={cleaner.id} value={cleaner.id}>
+                          {cleaner.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
                   <div style={styles.popoverSection}>
                     <div style={styles.popoverLabel}>Location</div>
-                    <div style={styles.popoverValue}>
-                      {jobPopover.job.address ||
-                        jobPopover.job.customer?.address ||
-                        "-"}
+                    <div style={styles.popoverValueAddress}>
+                      {formatAddress(jobPopover.job)}
                     </div>
                   </div>
 
@@ -849,9 +841,7 @@ export default function SchedulePage() {
                       <div style={styles.jobDetailRow}>
                         <span style={styles.jobDetailKey}>Address</span>
                         <span style={styles.jobDetailValue}>
-                          {editingJob.address ||
-                            editingJob.customer?.address ||
-                            "-"}
+                          {renderAddressText(editingJob)}
                         </span>
                       </div>
                     </div>
@@ -949,32 +939,23 @@ export default function SchedulePage() {
                         <h3 style={styles.modalSectionTitle}>Team</h3>
                       </div>
 
-                      <div style={styles.assigneeWrap}>
-                        {editCleanerCandidates.map((cleaner) => {
-                          const isCurrent =
-                            String(editingJob.cleanerId || "") ===
-                            String(cleaner.id);
-
-                          return (
-                            <button
-                              key={cleaner.id}
-                              type="button"
-                              style={{
-                                ...styles.assigneeChip,
-                                ...(isCurrent ? styles.assigneeChipActive : {}),
-                              }}
-                              onClick={() =>
-                                setEditingJob((prev) => ({
-                                  ...prev,
-                                  cleanerId: String(cleaner.id),
-                                }))
-                              }
-                            >
-                              {cleaner.name}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <select
+                        style={styles.formInput}
+                        value={editingJob.cleanerId || ""}
+                        onChange={(e) =>
+                          setEditingJob((prev) => ({
+                            ...prev,
+                            cleanerId: String(e.target.value),
+                          }))
+                        }
+                      >
+                        <option value="">Select cleaner</option>
+                        {cleaners.map((cleaner) => (
+                          <option key={cleaner.id} value={cleaner.id}>
+                            {cleaner.name}
+                          </option>
+                        ))}
+                      </select>
 
                       <div style={styles.checkRow}>
                         <label style={styles.checkboxLabel}>
@@ -1039,15 +1020,546 @@ export default function SchedulePage() {
   );
 }
 
-function getWeekDays(date) {
-  const current = new Date(date);
+function MonthView({
+  currentDate,
+  monthGrid,
+  weekdayHeaders,
+  jobsByDate,
+  selectedJob,
+  onOpenJob,
+  setCurrentDate,
+  setView,
+}) {
+  const todayKey = formatDate(new Date());
+  const currentMonth = stripTime(currentDate).getMonth();
+  const currentYear = stripTime(currentDate).getFullYear();
+
+  return (
+    <div style={styles.monthWrap}>
+      <div style={styles.monthWeekdayHeaderRow}>
+        {weekdayHeaders.map((label) => (
+          <div key={label} style={styles.monthWeekdayHeaderCell}>
+            {label}
+          </div>
+        ))}
+      </div>
+
+      <div style={styles.monthGrid}>
+        {monthGrid.map((day) => {
+          const dayJobs = jobsByDate[day.key] || [];
+          const isToday = day.key === todayKey;
+          const isCurrentMonth =
+            day.fullDate.getMonth() === currentMonth &&
+            day.fullDate.getFullYear() === currentYear;
+
+          return (
+            <div
+              key={day.key}
+              style={{
+                ...styles.monthCell,
+                ...(isCurrentMonth ? {} : styles.monthCellMuted),
+                ...(isToday ? styles.monthCellToday : {}),
+              }}
+              onDoubleClick={() => {
+                setCurrentDate(day.fullDate);
+                setView("day");
+              }}
+            >
+              <div style={styles.monthCellHeader}>
+                <div
+                  style={{
+                    ...styles.monthCellDate,
+                    ...(isToday ? styles.monthCellDateToday : {}),
+                  }}
+                >
+                  {day.dayNumber}
+                </div>
+
+                {dayJobs.length > 0 && (
+                  <div style={styles.monthCellCount}>{dayJobs.length}</div>
+                )}
+              </div>
+
+              <div style={styles.monthCellBody}>
+                {dayJobs.slice(0, 3).map((job) => {
+                  const isSelected =
+                    selectedJob && String(selectedJob.id) === String(job.id);
+
+                  return (
+                    <div
+                      key={job.id}
+                      style={{
+                        ...styles.monthJobPill,
+                        ...getJobBlockStyle(job.status, isSelected),
+                      }}
+                      onClick={(e) => onOpenJob(e, job)}
+                      title={`${job.customer?.name || "Unknown Customer"} • ${
+                        job.serviceTime || "Anytime"
+                      }`}
+                    >
+                      <span style={styles.monthJobTimeTiny}>
+                        {job.serviceTime || "Any"}
+                      </span>
+                      <span style={styles.monthJobNameTiny}>
+                        {job.customer?.name || "Unknown Customer"}
+                      </span>
+                    </div>
+                  );
+                })}
+
+                {dayJobs.length > 3 && (
+                  <div style={styles.moreJobsText}>+{dayJobs.length - 3} more</div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={styles.monthHint}>
+        Double click a day cell to open Day view.
+      </div>
+    </div>
+  );
+}
+
+function WeekView({
+  weekDays,
+  jobsByDay,
+  selectedJob,
+  draggingJobId,
+  dropTargetDay,
+  setDropTargetDay,
+  setDraggingJobId,
+  onOpenJob,
+}) {
+  return (
+    <>
+      <div style={styles.calendarHeader}>
+        <div style={styles.timeHeaderSpacer} />
+        <div style={styles.weekHeaderGrid}>
+          {weekDays.map((day) => {
+            const count = jobsByDay[day.key]?.length || 0;
+            const isToday = day.key === formatDate(new Date());
+
+            return (
+              <div key={day.key} style={styles.weekHeaderCell}>
+                <div
+                  style={{
+                    ...styles.dayBadge,
+                    ...(isToday ? styles.dayBadgeToday : {}),
+                  }}
+                >
+                  {day.shortLabel}
+                </div>
+                <div style={styles.dayDateText}>{day.dayNumber}</div>
+                <div style={styles.dayVisitText}>
+                  {count} visit{count === 1 ? "" : "s"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={styles.calendarBody}>
+        <div style={styles.timeColumn}>
+          <div style={styles.anytimeLabel}>↓ Anytime</div>
+          {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => {
+            const hour = START_HOUR + i;
+            return (
+              <div
+                key={hour}
+                style={{
+                  ...styles.timeCell,
+                  height: HOUR_ROW_HEIGHT,
+                }}
+              >
+                {formatHour(hour)}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={styles.daysGrid}>
+          {weekDays.map((day) => {
+            const isDropTarget = dropTargetDay === day.key;
+            const dayJobs = jobsByDay[day.key] || [];
+            const laidOutJobs = computeDayJobLayout(dayJobs);
+
+            return (
+              <div
+                key={day.key}
+                style={{
+                  ...styles.dayColumn,
+                  ...(isDropTarget ? styles.dayColumnActive : {}),
+                }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDropTargetDay(day.key);
+                }}
+                onDragLeave={() => {
+                  if (dropTargetDay === day.key) setDropTargetDay("");
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropTargetDay("");
+                }}
+              >
+                {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      ...styles.gridHourRow,
+                      height: HOUR_ROW_HEIGHT,
+                    }}
+                  />
+                ))}
+
+                {laidOutJobs.map((job) => {
+                  const top = getTopOffset(job.serviceTime);
+                  const blockHeight = getJobHeight(job);
+
+                  const columnsInGroup = job.__layout?.columnsInGroup || 1;
+                  const column = job.__layout?.column || 0;
+
+                  const widthPercent = 96 / columnsInGroup;
+                  const leftPercent = 2 + column * widthPercent;
+
+                  const isSelected =
+                    selectedJob && String(selectedJob.id) === String(job.id);
+
+                  return (
+                    <div
+                      key={job.id}
+                      draggable
+                      onDragStart={(e) => {
+                        setDraggingJobId(job.id);
+                        e.dataTransfer.setData("text/plain", String(job.id));
+                      }}
+                      onDragEnd={() => {
+                        setDraggingJobId(null);
+                        setDropTargetDay("");
+                      }}
+                      onClick={(e) => onOpenJob(e, job)}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = "translateY(-2px)";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = "none";
+                      }}
+                      style={{
+                        ...styles.jobBlock,
+                        ...(draggingJobId === job.id ? styles.jobBlockDragging : {}),
+                        ...getJobBlockStyle(job.status, isSelected),
+                        top,
+                        height: blockHeight,
+                        width: `${widthPercent}%`,
+                        left: `${leftPercent}%`,
+                      }}
+                    >
+                      <div style={styles.jobBlockInner}>
+                        <div style={styles.jobBlockTopRow}>
+                          {String(job.status || "").toLowerCase() === "completed" && (
+                            <span style={styles.jobBlockCheck}>✓</span>
+                          )}
+
+                          <div style={styles.jobBlockTitle}>
+                            {job.customer?.name || "Unknown Customer"}
+                          </div>
+                        </div>
+
+                        <div style={styles.jobBlockTime}>
+                          {job.serviceTime || "Anytime"}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DayView({
+  dayDate,
+  jobs,
+  selectedJob,
+  draggingJobId,
+  setDraggingJobId,
+  onOpenJob,
+}) {
+  const laidOutJobs = computeDayJobLayout(jobs);
+
+  return (
+    <>
+      <div style={styles.calendarHeader}>
+        <div style={styles.timeHeaderSpacer} />
+        <div style={styles.singleDayHeaderCell}>
+          <div style={styles.dayBadgeToday}>{formatWeekdayShort(dayDate)}</div>
+          <div style={styles.dayDateText}>{dayDate.getDate()}</div>
+          <div style={styles.dayVisitText}>
+            {jobs.length} visit{jobs.length === 1 ? "" : "s"}
+          </div>
+        </div>
+      </div>
+
+      <div style={styles.calendarBody}>
+        <div style={styles.timeColumn}>
+          <div style={styles.anytimeLabel}>↓ Anytime</div>
+          {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => {
+            const hour = START_HOUR + i;
+            return (
+              <div
+                key={hour}
+                style={{
+                  ...styles.timeCell,
+                  height: HOUR_ROW_HEIGHT,
+                }}
+              >
+                {formatHour(hour)}
+              </div>
+            );
+          })}
+        </div>
+
+        <div style={styles.singleDayGrid}>
+          {Array.from({ length: END_HOUR - START_HOUR + 1 }).map((_, i) => (
+            <div
+              key={i}
+              style={{
+                ...styles.gridHourRow,
+                height: HOUR_ROW_HEIGHT,
+              }}
+            />
+          ))}
+
+          {laidOutJobs.map((job) => {
+            const top = getTopOffset(job.serviceTime);
+            const blockHeight = getJobHeight(job);
+
+            const columnsInGroup = job.__layout?.columnsInGroup || 1;
+            const column = job.__layout?.column || 0;
+
+            const widthPercent = 96 / columnsInGroup;
+            const leftPercent = 2 + column * widthPercent;
+
+            const isSelected =
+              selectedJob && String(selectedJob.id) === String(job.id);
+
+            return (
+              <div
+                key={job.id}
+                draggable
+                onDragStart={(e) => {
+                  setDraggingJobId(job.id);
+                  e.dataTransfer.setData("text/plain", String(job.id));
+                }}
+                onDragEnd={() => {
+                  setDraggingJobId(null);
+                }}
+                onClick={(e) => onOpenJob(e, job)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = "translateY(-2px)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = "none";
+                }}
+                style={{
+                  ...styles.jobBlock,
+                  ...(draggingJobId === job.id ? styles.jobBlockDragging : {}),
+                  ...getJobBlockStyle(job.status, isSelected),
+                  top,
+                  height: blockHeight,
+                  width: `${widthPercent}%`,
+                  left: `${leftPercent}%`,
+                }}
+              >
+                <div style={styles.jobBlockInner}>
+                  <div style={styles.jobBlockTopRow}>
+                    {String(job.status || "").toLowerCase() === "completed" && (
+                      <span style={styles.jobBlockCheck}>✓</span>
+                    )}
+
+                    <div style={styles.jobBlockTitle}>
+                      {job.customer?.name || "Unknown Customer"}
+                    </div>
+                  </div>
+
+                  <div style={styles.jobBlockTime}>
+                    {job.serviceTime || "Anytime"}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* =========================
+   Date / Time Helpers
+========================= */
+
+function getSafeTimeZone(timezone) {
+  const fallback = "UTC";
+  const tz = String(timezone || "").trim();
+
+  if (!tz) return fallback;
+
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date());
+    return tz;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeFirstDayOfWeek(value) {
+  const n = Number(value);
+  if (Number.isInteger(n) && n >= 0 && n <= 6) return n;
+  return 0;
+}
+
+function parseDateOnly(input) {
+  if (!input) return null;
+  if (input instanceof Date) return stripTime(input);
+
+  const str = String(input);
+  const m = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) return null;
+  return stripTime(d);
+}
+
+function stripTime(date) {
+  const d = date instanceof Date ? new Date(date) : new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function startOfMonth(date) {
+  const d = stripTime(date);
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function endOfMonth(date) {
+  const d = stripTime(date);
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
+
+function addDays(date, days) {
+  const d = stripTime(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function addMonths(date, months) {
+  const d = stripTime(date);
+  return new Date(d.getFullYear(), d.getMonth() + months, 1);
+}
+
+function formatDate(dateInput) {
+  if (!dateInput) return "";
+  const d = parseDateOnly(dateInput);
+  if (!d) return "";
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+
+  return `${y}-${m}-${day}`;
+}
+
+function formatMonthYear(date, timezone) {
+  const safeTz = getSafeTimeZone(timezone);
+  const d = date instanceof Date ? date : new Date(date);
+
+  if (Number.isNaN(d.getTime())) return "";
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    year: "numeric",
+    timeZone: safeTz,
+  }).format(d);
+}
+
+function formatLongDate(date, timezone) {
+  const safeTz = getSafeTimeZone(timezone);
+  const d = date instanceof Date ? date : new Date(date);
+
+  if (Number.isNaN(d.getTime())) return "";
+
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: safeTz,
+  }).format(d);
+}
+
+function formatWeekRangeLabel(weekDays, timezone) {
+  if (!Array.isArray(weekDays) || weekDays.length === 0) return "";
+
+  const start = weekDays[0]?.fullDate;
+  const end = weekDays[weekDays.length - 1]?.fullDate;
+
+  if (!(start instanceof Date) || Number.isNaN(start.getTime())) return "";
+  if (!(end instanceof Date) || Number.isNaN(end.getTime())) return "";
+
+  const safeTz = getSafeTimeZone(timezone);
+
+  const sameMonth = start.getMonth() === end.getMonth();
+  const sameYear = start.getFullYear() === end.getFullYear();
+
+  const startText = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
+    timeZone: safeTz,
+  }).format(start);
+
+  const endText = new Intl.DateTimeFormat(undefined, {
+    month: sameMonth ? undefined : "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: safeTz,
+  }).format(end);
+
+  return `${startText} - ${endText}`;
+}
+
+function formatWeekdayShort(date) {
+  const d = date instanceof Date ? date : new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { weekday: "short" });
+}
+
+function getWeekdayHeaders(firstDayOfWeek = 0) {
+  const base = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const safe = normalizeFirstDayOfWeek(firstDayOfWeek);
+  return [...base.slice(safe), ...base.slice(0, safe)];
+}
+
+function getWeekDays(date, firstDayOfWeek = 0) {
+  const current = stripTime(date);
+  const safe = normalizeFirstDayOfWeek(firstDayOfWeek);
   const day = current.getDay();
-  const sunday = new Date(current);
-  sunday.setDate(current.getDate() - day);
+  const diff = (day - safe + 7) % 7;
+  const weekStart = addDays(current, -diff);
 
   return Array.from({ length: 7 }).map((_, index) => {
-    const d = new Date(sunday);
-    d.setDate(sunday.getDate() + index);
+    const d = addDays(weekStart, index);
 
     return {
       key: formatDate(d),
@@ -1058,27 +1570,33 @@ function getWeekDays(date) {
   });
 }
 
-function addDays(date, days) {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
+function getMonthGrid(date, firstDayOfWeek = 0) {
+  const safe = normalizeFirstDayOfWeek(firstDayOfWeek);
+  const monthStart = startOfMonth(date);
+  const monthEnd = endOfMonth(date);
 
-function formatDate(dateInput) {
-  if (!dateInput) return "";
-  const d = new Date(dateInput);
-  if (Number.isNaN(d.getTime())) {
-    if (typeof dateInput === "string") return dateInput.split("T")[0];
-    return "";
+  const startDay = monthStart.getDay();
+  const startDiff = (startDay - safe + 7) % 7;
+  const gridStart = addDays(monthStart, -startDiff);
+
+  const endDay = monthEnd.getDay();
+  const lastDayOfWeek = (safe + 6) % 7;
+  const endDiff = (lastDayOfWeek - endDay + 7) % 7;
+  const gridEnd = addDays(monthEnd, endDiff);
+
+  const days = [];
+  let cursor = gridStart;
+
+  while (cursor <= gridEnd) {
+    days.push({
+      key: formatDate(cursor),
+      dayNumber: cursor.getDate(),
+      fullDate: cursor,
+    });
+    cursor = addDays(cursor, 1);
   }
-  return d.toISOString().split("T")[0];
-}
 
-function formatMonthYear(date) {
-  return date.toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-  });
+  return days;
 }
 
 function parseTimeToMinutes(timeString) {
@@ -1107,6 +1625,7 @@ function parseTimeToMinutes(timeString) {
   if (match24) {
     const hour = Number(match24[1]);
     const minute = Number(match24[2]);
+
     if (!Number.isNaN(hour) && !Number.isNaN(minute)) {
       return hour * 60 + minute;
     }
@@ -1123,13 +1642,23 @@ function normalizeTimeInput(value) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
+function estimateEndTime(startTime, durationMinutes) {
+  if (!startTime) return "";
+  const start = parseTimeToMinutes(startTime);
+  const duration = Number(durationMinutes || DEFAULT_DURATION_MINUTES);
+  const end = start + duration;
+  const h = Math.floor((end % (24 * 60)) / 60);
+  const m = end % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 function getJobStartMinutes(job) {
-  return parseTimeToMinutes(job.serviceTime || "00:00");
+  return parseTimeToMinutes(job?.serviceTime || "00:00");
 }
 
 function getJobEndMinutes(job) {
   const start = getJobStartMinutes(job);
-  const duration = Number(job.durationMinutes || 120);
+  const duration = Number(job?.durationMinutes || DEFAULT_DURATION_MINUTES);
   return start + duration;
 }
 
@@ -1143,7 +1672,7 @@ function jobsOverlap(jobA, jobB) {
 }
 
 function computeDayJobLayout(dayJobs) {
-  if (!dayJobs || dayJobs.length === 0) return [];
+  if (!Array.isArray(dayJobs) || dayJobs.length === 0) return [];
 
   const sorted = [...dayJobs].sort((a, b) => {
     const diff = getJobStartMinutes(a) - getJobStartMinutes(b);
@@ -1220,311 +1749,627 @@ function getTopOffset(serviceTime) {
   const minutes = parseTimeToMinutes(serviceTime || "00:00");
   const startMinutes = START_HOUR * 60;
   const relativeMinutes = Math.max(0, minutes - startMinutes);
-  return 26 + (relativeMinutes / 60) * HOUR_ROW_HEIGHT;
+  return 40 + (relativeMinutes / 60) * HOUR_ROW_HEIGHT;
 }
 
 function getJobHeight(job) {
-  const minutes = Number(job.durationMinutes || 120);
-  return Math.max(56, (minutes / 60) * HOUR_ROW_HEIGHT);
+  const duration = Number(job?.durationMinutes || DEFAULT_DURATION_MINUTES);
+  return Math.max(42, (duration / 60) * HOUR_ROW_HEIGHT - 4);
 }
 
 function formatHour(hour) {
-  return `${String(hour).padStart(2, "0")}:00`;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const normalized = hour % 12 === 0 ? 12 : hour % 12;
+  return `${normalized}:00 ${suffix}`;
 }
 
-function estimateEndTime(start, durationMinutes = 120) {
-  if (!start) return "";
-  const total = parseTimeToMinutes(start) + Number(durationMinutes || 120);
-  const h = Math.floor(total / 60) % 24;
-  const m = total % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
+function getJobBlockStyle(status, isSelected = false) {
+  const value = String(status || "").toLowerCase();
 
-function getJobBlockStyle(status, isSelected) {
-  const s = String(status || "").toLowerCase();
-
-  if (s === "completed" || s === "done") {
-    return {
-      background: "#e5e7eb",
-      color: "#6b7280",
-      border: "1px solid #d1d5db",
-    };
-  }
-
-  if (isSelected) {
-    return {
-      background: "#1f6f11",
-      color: "#ffffff",
-      boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
-    };
-  }
-
-  return {
-    background: "#dff5dc",
-    color: "#1f6f11",
-    border: "1px solid #b7e3b0",
+  let base = {
+    background: "linear-gradient(180deg, #e8f0fe 0%, #dbeafe 100%)",
+    border: "1px solid #bfdbfe",
+    color: "#0f172a",
   };
+
+  if (value === "completed" || value === "done") {
+    base = {
+      background: "linear-gradient(180deg, #e5e7eb 0%, #d1d5db 100%)",
+      border: "1px solid #cbd5e1",
+      color: "#334155",
+    };
+  } else if (value === "pending") {
+    base = {
+      background: "linear-gradient(180deg, #fef3c7 0%, #fde68a 100%)",
+      border: "1px solid #facc15",
+      color: "#78350f",
+    };
+  } else if (
+    value === "in_progress" ||
+    value === "ongoing" ||
+    value === "active"
+  ) {
+    base = {
+      background: "linear-gradient(180deg, #dcfce7 0%, #bbf7d0 100%)",
+      border: "1px solid #86efac",
+      color: "#14532d",
+    };
+  }
+
+  return isSelected
+    ? {
+        ...base,
+        boxShadow:
+          "0 0 0 2px rgba(37,99,235,0.22), 0 10px 20px rgba(15,23,42,0.12)",
+      }
+    : base;
 }
+
+function renderAddressText(job) {
+  if (!job) return "-";
+  const address =
+    job.address ||
+    job.serviceAddress ||
+    job.customer?.address ||
+    job.location ||
+    "";
+  return address || "-";
+}
+
+function formatAddress(job) {
+  return renderAddressText(job);
+}
+
+/* =========================
+   Styles
+========================= */
 
 const styles = {
   page: {
-    display: "grid",
-    gap: "16px",
+    padding: 20,
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
   },
 
   loadingCard: {
     background: "#fff",
-    borderRadius: "16px",
-    padding: "24px",
-    border: "1px solid #dfe5ea",
+    border: "1px solid #e5e7eb",
+    borderRadius: 18,
+    padding: 28,
+    fontSize: 15,
+    fontWeight: 600,
+    color: "#334155",
   },
 
   topBar: {
     display: "flex",
+    alignItems: "center",
     justifyContent: "space-between",
-    alignItems: "flex-end",
-    gap: "16px",
+    gap: 16,
     flexWrap: "wrap",
   },
 
   topBarLeft: {
     display: "flex",
     flexDirection: "column",
-    gap: "8px",
+    gap: 6,
   },
 
   monthRow: {
     display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    flexWrap: "wrap",
+    flexDirection: "column",
+    gap: 4,
   },
 
   monthTitle: {
     margin: 0,
-    fontSize: "38px",
-    lineHeight: 1.05,
-    fontWeight: "800",
+    fontSize: 30,
+    fontWeight: 800,
     color: "#0f172a",
-    letterSpacing: "-0.03em",
+    letterSpacing: "-0.02em",
+  },
+
+  subTitle: {
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: 600,
   },
 
   topBarRight: {
     display: "flex",
     alignItems: "center",
-    gap: "8px",
+    gap: 10,
     flexWrap: "wrap",
   },
 
   navBtn: {
-    width: "36px",
-    height: "36px",
-    borderRadius: "10px",
-    border: "1px solid #d7dde3",
+    border: "1px solid #dbe3ef",
     background: "#fff",
+    color: "#0f172a",
+    borderRadius: 12,
+    padding: "10px 14px",
     cursor: "pointer",
-    fontWeight: "700",
+    fontWeight: 800,
+    fontSize: 14,
   },
 
   todayBtn: {
-    height: "36px",
-    padding: "0 14px",
-    borderRadius: "10px",
-    border: "1px solid #d7dde3",
+    border: "1px solid #dbe3ef",
     background: "#fff",
+    color: "#0f172a",
+    borderRadius: 12,
+    padding: "10px 16px",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: 700,
+    fontSize: 14,
   },
 
   findTimeBtn: {
-    height: "36px",
-    padding: "0 16px",
-    borderRadius: "10px",
     border: "none",
-    background: "#49a12f",
+    background: "#2563eb",
     color: "#fff",
+    borderRadius: 12,
+    padding: "10px 16px",
     cursor: "pointer",
-    fontWeight: "700",
+    fontWeight: 800,
+    fontSize: 14,
+    boxShadow: "0 8px 18px rgba(37,99,235,0.22)",
   },
 
   filterRow: {
     display: "flex",
-    justifyContent: "space-between",
-    gap: "16px",
-    flexWrap: "wrap",
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
   },
 
   filterLeft: {
     display: "flex",
-    gap: "10px",
+    gap: 10,
     flexWrap: "wrap",
   },
 
   filterRight: {
     display: "flex",
-    gap: "12px",
-    flexWrap: "wrap",
     alignItems: "center",
+    gap: 14,
+    flexWrap: "wrap",
   },
 
   filterSelect: {
-    height: "40px",
-    padding: "0 14px",
-    borderRadius: "999px",
-    border: "1px solid #cfd8e3",
+    height: 42,
+    borderRadius: 12,
+    border: "1px solid #dbe3ef",
     background: "#fff",
-    fontSize: "14px",
+    padding: "0 14px",
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#0f172a",
+    minWidth: 160,
+    outline: "none",
   },
 
   timezoneNotice: {
-    padding: "10px 14px",
-    borderRadius: "10px",
-    background: "#eef6ff",
-    color: "#356da5",
-    fontSize: "13px",
-    border: "1px solid #d7e9ff",
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: 600,
   },
 
   viewSwitcher: {
-    display: "flex",
-    alignItems: "center",
-    border: "1px solid #d7dde3",
-    borderRadius: "10px",
-    overflow: "hidden",
-    background: "#fff",
-  },
-
-  viewBtnMuted: {
-    height: "36px",
-    padding: "0 14px",
-    border: "none",
-    background: "#fff",
-    color: "#64748b",
-    cursor: "pointer",
-    fontWeight: "600",
+    display: "inline-flex",
+    padding: 4,
+    borderRadius: 14,
+    background: "#eef2ff",
+    gap: 4,
   },
 
   viewBtnActive: {
-    height: "36px",
-    padding: "0 14px",
     border: "none",
-    background: "#f0faed",
-    color: "#3f8f25",
+    background: "#fff",
+    color: "#1e3a8a",
+    borderRadius: 10,
+    padding: "9px 14px",
     cursor: "pointer",
-    fontWeight: "700",
+    fontWeight: 800,
+    fontSize: 13,
+    boxShadow: "0 2px 8px rgba(15,23,42,0.08)",
+  },
+
+  viewBtnMuted: {
+    border: "none",
+    background: "transparent",
+    color: "#475569",
+    borderRadius: 10,
+    padding: "9px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+    fontSize: 13,
   },
 
   infoBar: {
-    padding: "10px 14px",
     background: "#eff6ff",
     border: "1px solid #bfdbfe",
     color: "#1d4ed8",
-    borderRadius: "12px",
-    fontWeight: "600",
+    borderRadius: 14,
+    padding: "12px 14px",
+    fontWeight: 700,
+    fontSize: 14,
   },
 
   scheduleLayout: {
     display: "grid",
     gridTemplateColumns: "minmax(0, 1fr) 320px",
-    gap: "0",
-    borderRadius: "16px",
-    overflow: "hidden",
-    border: "1px solid #dfe5ea",
-    background: "#fff",
-    minHeight: "720px",
+    gap: 16,
+    alignItems: "start",
   },
 
   calendarCard: {
+    background: "#fff",
+    borderRadius: 20,
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 12px 28px rgba(15,23,42,0.04)",
+    overflow: "hidden",
+  },
+
+  rightPanel: {
     display: "flex",
     flexDirection: "column",
+    gap: 16,
+  },
+
+  unscheduledCard: {
     background: "#fff",
-    borderRight: "1px solid #dfe5ea",
+    borderRadius: 18,
+    border: "1px solid #e5e7eb",
+    padding: 16,
+  },
+
+  unscheduledHeader: {
+    marginBottom: 12,
+  },
+
+  unscheduledTitle: {
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#0f172a",
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  unscheduledCount: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 22,
+    height: 22,
+    padding: "0 8px",
+    borderRadius: 999,
+    background: "#e2e8f0",
+    color: "#0f172a",
+    fontSize: 12,
+    fontWeight: 800,
+  },
+
+  unscheduledEmpty: {
+    color: "#64748b",
+    fontSize: 14,
+    fontWeight: 600,
+    lineHeight: 1.5,
+  },
+
+  unscheduledList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+    maxHeight: 420,
+    overflowY: "auto",
+  },
+
+  unscheduledItem: {
+    border: "1px solid #e2e8f0",
+    borderRadius: 14,
+    padding: 12,
+    cursor: "pointer",
+    background: "#f8fafc",
+  },
+
+  unscheduledItemTitle: {
+    fontSize: 14,
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: 4,
+  },
+
+  unscheduledItemMeta: {
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: 700,
+  },
+
+  placeholderCard: {
+    background: "#fff",
+    borderRadius: 18,
+    border: "1px solid #e5e7eb",
+    padding: 16,
+  },
+
+  placeholderTitle: {
+    fontSize: 16,
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: 10,
+  },
+
+  placeholderText: {
+    fontSize: 15,
+    color: "#334155",
+    fontWeight: 700,
+    marginBottom: 6,
+  },
+
+  placeholderSub: {
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: 600,
+  },
+
+  monthWrap: {
+    display: "flex",
+    flexDirection: "column",
+  },
+
+  monthWeekdayHeaderRow: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+    borderBottom: "1px solid #e5e7eb",
+    background: "#f8fafc",
+  },
+
+  monthWeekdayHeaderCell: {
+    padding: "14px 10px",
+    textAlign: "center",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+
+  monthGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+  },
+
+  monthCell: {
+    minHeight: 138,
+    borderRight: "1px solid #eef2f7",
+    borderBottom: "1px solid #eef2f7",
+    padding: 10,
+    background: "#fff",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+
+  monthCellMuted: {
+    background: "#fbfcfe",
+  },
+
+  monthCellToday: {
+    background: "#f8fbff",
+  },
+
+  monthCellHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+
+  monthCellDate: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 13,
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+
+  monthCellDateToday: {
+    background: "#2563eb",
+    color: "#fff",
+  },
+
+  monthCellCount: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 999,
+    background: "#e2e8f0",
+    color: "#0f172a",
+    fontSize: 11,
+    fontWeight: 800,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: "0 6px",
+  },
+
+  monthCellBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    overflow: "hidden",
+  },
+
+  monthJobPill: {
+    borderRadius: 10,
+    padding: "6px 8px",
+    fontSize: 12,
+    fontWeight: 700,
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    cursor: "pointer",
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+  },
+
+  monthJobTimeTiny: {
+    flex: "0 0 auto",
+    fontSize: 11,
+    fontWeight: 800,
+    opacity: 0.8,
+  },
+
+  monthJobNameTiny: {
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+
+  moreJobsText: {
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#64748b",
+    paddingLeft: 2,
+  },
+
+  monthHint: {
+    padding: 12,
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: 700,
+    borderTop: "1px solid #eef2f7",
+    background: "#fafcff",
   },
 
   calendarHeader: {
     display: "grid",
-    gridTemplateColumns: "52px repeat(7, 1fr)",
-    borderBottom: "1px solid #dfe5ea",
+    gridTemplateColumns: "72px minmax(0, 1fr)",
+    borderBottom: "1px solid #e5e7eb",
     background: "#fff",
   },
 
   timeHeaderSpacer: {
-    borderRight: "1px solid #edf1f5",
+    borderRight: "1px solid #eef2f7",
   },
 
-  dayHeaderCell: {
-    padding: "10px 8px",
-    minHeight: "72px",
+  weekHeaderGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(7, 1fr)",
+  },
+
+  weekHeaderCell: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    gap: "4px",
-    borderRight: "1px solid #edf1f5",
+    minWidth: 0,
+  },
+
+  singleDayHeaderCell: {
+    padding: "14px 18px",
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
   },
 
   dayBadge: {
-    padding: "4px 8px",
-    borderRadius: "10px",
-    fontSize: "13px",
-    fontWeight: "700",
-    color: "#243447",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    background: "#eef2ff",
+    color: "#4338ca",
+    fontSize: 12,
+    fontWeight: 800,
+    padding: "6px 10px",
+    margin: "14px auto 6px",
+    width: "fit-content",
   },
 
   dayBadgeToday: {
-    background: "#2f78c4",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 999,
+    background: "#2563eb",
     color: "#fff",
+    fontSize: 12,
+    fontWeight: 800,
+    padding: "6px 10px",
+    width: "fit-content",
   },
 
   dayDateText: {
-    fontSize: "28px",
-    fontWeight: "800",
+    fontSize: 22,
+    fontWeight: 800,
     color: "#0f172a",
-    lineHeight: 1,
+    textAlign: "center",
   },
 
   dayVisitText: {
-    fontSize: "12px",
-    color: "#7b8794",
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: 700,
+    textAlign: "center",
+    paddingBottom: 12,
   },
 
   calendarBody: {
     display: "grid",
-    gridTemplateColumns: "52px minmax(0, 1fr)",
-    minHeight: "680px",
+    gridTemplateColumns: "72px minmax(0, 1fr)",
+    minHeight: 540,
   },
 
   timeColumn: {
-    borderRight: "1px solid #edf1f5",
+    borderRight: "1px solid #eef2f7",
     background: "#fff",
     position: "relative",
   },
 
   anytimeLabel: {
-    height: "26px",
-    fontSize: "12px",
-    color: "#66758a",
-    padding: "8px 6px 0",
+    height: 40,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 800,
+    borderBottom: "1px solid #eef2f7",
   },
 
   timeCell: {
-    borderTop: "1px solid #edf1f5",
-    fontSize: "12px",
-    color: "#708198",
-    padding: "4px 6px",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "flex-start",
+    paddingTop: 6,
+    color: "#64748b",
+    fontSize: 12,
+    fontWeight: 700,
+    borderBottom: "1px solid #f1f5f9",
     boxSizing: "border-box",
   },
 
   daysGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(7, 1fr)",
+    background: "#fff",
+  },
+
+  singleDayGrid: {
     position: "relative",
+    background: "#fff",
   },
 
   dayColumn: {
     position: "relative",
-    borderRight: "1px solid #edf1f5",
+    borderRight: "1px solid #eef2f7",
+    minHeight: 1384,
     background: "#fff",
   },
 
@@ -1533,444 +2378,365 @@ const styles = {
   },
 
   gridHourRow: {
-    borderTop: "1px solid #edf1f5",
+    borderBottom: "1px solid #f1f5f9",
     boxSizing: "border-box",
   },
 
   jobBlock: {
     position: "absolute",
-    borderRadius: "4px",
-    padding: "10px 10px",
+    borderRadius: 12,
+    padding: "8px 8px 7px",
     boxSizing: "border-box",
     cursor: "pointer",
+    transition: "transform 0.15s ease",
     overflow: "hidden",
-    fontSize: "12px",
-    fontWeight: "700",
-    zIndex: 2,
-    transition: "all 0.15s ease",
+    boxShadow: "0 4px 12px rgba(15,23,42,0.06)",
   },
 
   jobBlockDragging: {
-    opacity: 0.55,
+    opacity: 0.6,
+  },
+
+  jobBlockInner: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+
+  jobBlockTopRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  jobBlockCheck: {
+    fontSize: 12,
+    fontWeight: 900,
   },
 
   jobBlockTitle: {
-    fontSize: "12px",
-    lineHeight: 1.35,
-    fontWeight: "700",
-    whiteSpace: "nowrap",
+    fontSize: 12,
+    fontWeight: 800,
+    lineHeight: 1.3,
     overflow: "hidden",
     textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   jobBlockTime: {
-    marginTop: "4px",
-    fontSize: "12px",
-    opacity: 0.95,
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-
-  rightPanel: {
-    background: "#fff",
-    display: "grid",
-    gridTemplateRows: "auto 1fr",
-    minHeight: "720px",
-  },
-
-  unscheduledCard: {
-    borderBottom: "1px solid #dfe5ea",
-    padding: "12px",
-  },
-
-  unscheduledHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: "12px",
-  },
-
-  unscheduledTitle: {
-    fontSize: "16px",
-    fontWeight: "800",
-    color: "#0f172a",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-  },
-
-  unscheduledCount: {
-    minWidth: "22px",
-    height: "22px",
-    padding: "0 6px",
-    borderRadius: "999px",
-    background: "#eef2f7",
-    color: "#4b5563",
-    fontSize: "12px",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  unscheduledEmpty: {
-    minHeight: "130px",
-    border: "1px dashed #d7dde3",
-    borderRadius: "12px",
-    color: "#6b7280",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    textAlign: "center",
-    fontSize: "14px",
-    padding: "16px",
-  },
-
-  unscheduledList: {
-    display: "grid",
-    gap: "10px",
-  },
-
-  unscheduledItem: {
-    border: "1px solid #e5e7eb",
-    borderRadius: "12px",
-    padding: "12px",
-    cursor: "pointer",
-    background: "#fff",
-  },
-
-  unscheduledItemTitle: {
-    fontWeight: "700",
-    color: "#0f172a",
-    fontSize: "14px",
-  },
-
-  unscheduledItemMeta: {
-    marginTop: "4px",
-    color: "#6b7280",
-    fontSize: "12px",
-  },
-
-  placeholderCard: {
-    padding: "16px",
-  },
-
-  placeholderTitle: {
-    fontSize: "18px",
-    fontWeight: "800",
-    color: "#0f172a",
-  },
-
-  placeholderText: {
-    marginTop: "8px",
-    fontSize: "14px",
-    color: "#475569",
-  },
-
-  placeholderSub: {
-    marginTop: "6px",
-    fontSize: "13px",
-    color: "#94a3b8",
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: 700,
+    opacity: 0.9,
   },
 
   popoverBackdrop: {
     position: "fixed",
     inset: 0,
     background: "transparent",
-    zIndex: 50,
+    zIndex: 49,
   },
 
   jobPopover: {
     position: "absolute",
-    width: "380px",
+    width: 380,
+    zIndex: 50,
     background: "#fff",
-    border: "1px solid #dfe5ea",
-    borderRadius: "12px",
-    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.18)",
-    padding: "16px",
-    zIndex: 60,
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    boxShadow: "0 24px 48px rgba(15,23,42,0.18)",
+    padding: 18,
   },
 
   jobPopoverHeader: {
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: "10px",
+    justifyContent: "space-between",
+    marginBottom: 10,
   },
 
   jobPopoverGrip: {
-    fontSize: "14px",
-    color: "#64748b",
-    letterSpacing: "1px",
+    color: "#94a3b8",
+    fontWeight: 900,
+    letterSpacing: 2,
   },
 
   jobPopoverClose: {
-    width: "28px",
-    height: "28px",
-    borderRadius: "8px",
-    border: "1px solid #d7dde3",
-    background: "#fff",
+    border: "none",
+    background: "transparent",
+    fontSize: 22,
     cursor: "pointer",
-    fontSize: "18px",
+    color: "#64748b",
     lineHeight: 1,
   },
 
   jobPopoverTitle: {
-    margin: 0,
-    fontSize: "18px",
-    fontWeight: "800",
+    margin: "0 0 4px 0",
+    fontSize: 22,
+    fontWeight: 800,
     color: "#0f172a",
-    lineHeight: 1.35,
   },
 
   jobPopoverType: {
-    marginTop: "4px",
-    fontSize: "13px",
+    fontSize: 13,
+    fontWeight: 700,
     color: "#64748b",
+    marginBottom: 14,
   },
 
   completedRow: {
-    marginTop: "14px",
-    display: "inline-flex",
+    display: "flex",
     alignItems: "center",
-    gap: "10px",
-    fontSize: "14px",
+    gap: 8,
+    fontSize: 14,
+    fontWeight: 700,
     color: "#334155",
+    marginBottom: 16,
   },
 
   popoverSection: {
-    marginTop: "16px",
+    marginBottom: 16,
   },
 
   popoverLabel: {
-    fontSize: "13px",
-    fontWeight: "800",
-    color: "#243447",
-    marginBottom: "6px",
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: 6,
   },
 
   popoverLink: {
-    fontSize: "14px",
-    color: "#5a9b2f",
-    fontWeight: "600",
+    fontSize: 14,
+    color: "#0f172a",
+    fontWeight: 700,
   },
 
-  popoverValue: {
-    fontSize: "14px",
-    color: "#475569",
-    lineHeight: 1.6,
+  teamSelect: {
+    width: "100%",
+    height: 42,
+    borderRadius: 12,
+    border: "1px solid #dbe3ef",
+    background: "#fff",
+    padding: "0 14px",
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#0f172a",
+    outline: "none",
+  },
+
+  popoverValueAddress: {
+    fontSize: 14,
+    color: "#334155",
+    fontWeight: 600,
+    lineHeight: 1.5,
   },
 
   popoverDateGrid: {
-    marginTop: "16px",
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: "18px",
+    gap: 14,
+    paddingTop: 4,
+    marginBottom: 18,
+  },
+
+  popoverValue: {
+    fontSize: 14,
+    color: "#0f172a",
+    fontWeight: 700,
+    lineHeight: 1.5,
   },
 
   popoverFooter: {
-    marginTop: "18px",
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: "10px",
-  },
-
-  assigneeWrap: {
     display: "flex",
-    gap: "8px",
-    flexWrap: "wrap",
-  },
-
-  assigneeChip: {
-    padding: "8px 10px",
-    borderRadius: "999px",
-    border: "1px solid #d6dce3",
-    background: "#f8fafc",
-    cursor: "pointer",
-    fontSize: "13px",
-    fontWeight: "700",
-  },
-
-  assigneeChipActive: {
-    background: "#e8f5e4",
-    border: "1px solid #8ac36f",
-    color: "#2f7a1f",
+    gap: 10,
   },
 
   editBtn: {
-    height: "40px",
-    borderRadius: "10px",
-    border: "1px solid #d1d5db",
+    flex: 1,
+    border: "1px solid #dbe3ef",
     background: "#fff",
+    color: "#0f172a",
+    borderRadius: 12,
+    height: 42,
     cursor: "pointer",
-    fontWeight: "700",
+    fontWeight: 800,
   },
 
   viewDetailBtn: {
-    height: "40px",
-    borderRadius: "10px",
+    flex: 1,
     border: "none",
-    background: "#4d972f",
+    background: "#2563eb",
     color: "#fff",
+    borderRadius: 12,
+    height: 42,
     cursor: "pointer",
-    fontWeight: "700",
+    fontWeight: 800,
   },
 
   modalOverlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(15, 23, 42, 0.28)",
+    background: "rgba(15,23,42,0.32)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    zIndex: 9999,
-    padding: "24px",
+    padding: 24,
+    zIndex: 60,
   },
 
   modalCard: {
-    width: "100%",
-    maxWidth: "980px",
+    width: "min(980px, 100%)",
+    maxHeight: "92vh",
+    overflowY: "auto",
     background: "#fff",
-    borderRadius: "16px",
-    border: "1px solid #dfe5ea",
-    boxShadow: "0 24px 60px rgba(15, 23, 42, 0.18)",
-    padding: "20px",
+    borderRadius: 22,
+    boxShadow: "0 30px 60px rgba(15,23,42,0.24)",
+    padding: 22,
   },
 
   modalHeader: {
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: "16px",
-    marginBottom: "12px",
+    justifyContent: "space-between",
+    gap: 16,
+    marginBottom: 20,
   },
 
   modalTitle: {
     margin: 0,
-    fontSize: "22px",
-    fontWeight: "800",
-    color: "#0f3340",
-    lineHeight: 1.35,
+    fontSize: 24,
+    fontWeight: 800,
+    color: "#0f172a",
   },
 
   modalCloseBtn: {
-    width: "32px",
-    height: "32px",
-    borderRadius: "10px",
-    border: "1px solid #d7dde3",
-    background: "#fff",
+    border: "none",
+    background: "transparent",
+    fontSize: 24,
     cursor: "pointer",
-    fontSize: "22px",
+    color: "#64748b",
     lineHeight: 1,
   },
 
   modalTopGrid: {
     display: "grid",
-    gridTemplateColumns: "1.4fr 0.8fr",
-    gap: "24px",
-    alignItems: "start",
-  },
-
-  modalDivider: {
-    height: "1px",
-    background: "#e5e7eb",
-    margin: "14px 0 10px",
-  },
-
-  modalMidGrid: {
-    display: "grid",
-    gridTemplateColumns: "1.3fr 0.9fr",
-    gap: "26px",
-    alignItems: "start",
-  },
-
-  modalSectionTitle: {
-    margin: "0 0 12px",
-    fontSize: "16px",
-    fontWeight: "800",
-    color: "#0f3340",
+    gridTemplateColumns: "1.2fr 0.8fr",
+    gap: 18,
   },
 
   formLabel: {
-    fontSize: "13px",
-    fontWeight: "700",
-    color: "#334155",
-    marginBottom: "6px",
+    fontSize: 12,
+    color: "#64748b",
+    fontWeight: 800,
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
+    marginBottom: 6,
   },
 
   formInput: {
     width: "100%",
-    height: "38px",
-    borderRadius: "10px",
-    border: "1px solid #cfd8e3",
-    background: "#fff",
-    padding: "0 12px",
-    fontSize: "14px",
+    minHeight: 44,
+    borderRadius: 12,
+    border: "1px solid #dbe3ef",
+    padding: "0 14px",
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#0f172a",
     boxSizing: "border-box",
+    outline: "none",
+    background: "#fff",
   },
 
   formTextarea: {
     width: "100%",
-    minHeight: "96px",
-    borderRadius: "10px",
-    border: "1px solid #cfd8e3",
-    background: "#fff",
-    padding: "10px 12px",
-    fontSize: "14px",
+    minHeight: 120,
+    borderRadius: 12,
+    border: "1px solid #dbe3ef",
+    padding: 14,
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#0f172a",
     boxSizing: "border-box",
+    outline: "none",
     resize: "vertical",
+    background: "#fff",
   },
 
   jobDetailsBox: {
-    paddingTop: "2px",
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    background: "#f8fafc",
+    padding: 16,
   },
 
   sideMiniTitle: {
-    fontSize: "15px",
-    fontWeight: "800",
-    color: "#0f3340",
-    marginBottom: "10px",
+    fontSize: 14,
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: 12,
   },
 
   jobDetailRow: {
-    display: "grid",
-    gridTemplateColumns: "72px 1fr",
-    gap: "10px",
-    marginBottom: "8px",
-    alignItems: "start",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: 12,
+    padding: "8px 0",
+    borderBottom: "1px solid #e2e8f0",
   },
 
   jobDetailKey: {
-    fontSize: "14px",
-    color: "#475569",
+    fontSize: 13,
+    color: "#64748b",
+    fontWeight: 700,
+    minWidth: 70,
   },
 
   jobDetailValue: {
-    fontSize: "14px",
-    color: "#62a54a",
-    fontWeight: "500",
-    wordBreak: "break-word",
+    fontSize: 13,
+    color: "#0f172a",
+    fontWeight: 700,
+    textAlign: "right",
+    lineHeight: 1.45,
+  },
+
+  modalDivider: {
+    height: 1,
+    background: "#e5e7eb",
+    margin: "22px 0",
+  },
+
+  modalMidGrid: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: 20,
+  },
+
+  modalSectionTitle: {
+    margin: "0 0 14px 0",
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0f172a",
   },
 
   scheduleFieldsGrid: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
-    gap: "14px",
+    gap: 14,
   },
 
   checkRow: {
-    marginTop: "12px",
-    display: "flex",
-    gap: "18px",
-    flexWrap: "wrap",
+    marginTop: 14,
   },
 
   checkboxLabel: {
     display: "inline-flex",
     alignItems: "center",
-    gap: "8px",
-    fontSize: "14px",
-    color: "#475569",
+    gap: 8,
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#334155",
   },
 
   teamHeaderRow: {
@@ -1980,66 +2746,66 @@ const styles = {
   },
 
   modalNoticeBox: {
-    marginTop: "18px",
-    borderRadius: "10px",
-    border: "1px solid #e4e7eb",
-    background: "#f8f7f4",
-    color: "#475569",
-    textAlign: "center",
-    padding: "16px",
-    fontSize: "14px",
+    marginTop: 20,
+    background: "#fff7ed",
+    border: "1px solid #fdba74",
+    color: "#9a3412",
+    borderRadius: 14,
+    padding: "12px 14px",
+    fontSize: 14,
+    fontWeight: 700,
   },
 
   modalFooter: {
-    marginTop: "18px",
     display: "flex",
-    justifyContent: "space-between",
-    gap: "12px",
     alignItems: "center",
-    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: 12,
+    marginTop: 22,
   },
 
   modalFooterLeft: {
     display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
+    gap: 10,
   },
 
   deleteBtn: {
-    height: "40px",
+    border: "1px solid #fecaca",
+    background: "#fff1f2",
+    color: "#b91c1c",
+    borderRadius: 12,
+    height: 42,
     padding: "0 16px",
-    borderRadius: "10px",
-    border: "1px solid #f1d1d1",
-    background: "#fff",
-    color: "#d13c3c",
-    fontWeight: "700",
     cursor: "pointer",
+    fontWeight: 800,
   },
 
   cancelBtn: {
-    height: "40px",
-    padding: "0 16px",
-    borderRadius: "10px",
-    border: "1px solid #d1d5db",
+    border: "1px solid #dbe3ef",
     background: "#fff",
-    color: "#334155",
-    fontWeight: "700",
+    color: "#0f172a",
+    borderRadius: 12,
+    height: 42,
+    padding: "0 16px",
     cursor: "pointer",
+    fontWeight: 800,
   },
 
   saveBtn: {
-    height: "40px",
-    padding: "0 18px",
-    borderRadius: "10px",
     border: "none",
-    background: "#4d972f",
+    background: "#2563eb",
     color: "#fff",
-    fontWeight: "700",
+    borderRadius: 12,
+    height: 44,
+    minWidth: 120,
+    padding: "0 18px",
     cursor: "pointer",
+    fontWeight: 800,
+    boxShadow: "0 10px 22px rgba(37,99,235,0.22)",
   },
 
   saveBtnDisabled: {
-    opacity: 0.65,
+    opacity: 0.6,
     cursor: "not-allowed",
   },
 };

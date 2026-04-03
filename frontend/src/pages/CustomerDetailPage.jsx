@@ -3,6 +3,8 @@ import axios from "axios";
 import { useNavigate, useParams } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import { API_BASE_URL } from "../config";
+import { useCompany } from "../context/CompanyContext";
+import { compareJobsBySchedule, formatDateForDisplay } from "../utils/time";
 
 const API = API_BASE_URL;
 
@@ -10,6 +12,7 @@ export default function CustomerDetailPage() {
   const token = localStorage.getItem("token");
   const { id } = useParams();
   const navigate = useNavigate();
+  const { timezone } = useCompany();
 
   const [customer, setCustomer] = useState(null);
   const [jobs, setJobs] = useState([]);
@@ -43,11 +46,7 @@ export default function CustomerDetailPage() {
 
       const customerJobs = allJobs
         .filter((job) => String(job.customerId) === String(id))
-        .sort((a, b) => {
-          const aTime = new Date(a.serviceDate || a.createdAt || 0).getTime();
-          const bTime = new Date(b.serviceDate || b.createdAt || 0).getTime();
-          return bTime - aTime;
-        });
+        .sort((a, b) => compareJobsBySchedule(b, a, timezone));
 
       setCustomer(foundCustomer);
       setJobs(customerJobs);
@@ -65,7 +64,7 @@ export default function CustomerDetailPage() {
     const assignedOrders = jobs.filter((j) => j.status === "assigned").length;
     const latestOrder =
       jobs.length > 0
-        ? formatDateTime(jobs[0].serviceDate, jobs[0].serviceTime)
+        ? formatDateTime(jobs[0].serviceDate, jobs[0].serviceTime, timezone)
         : "-";
 
     return {
@@ -74,7 +73,7 @@ export default function CustomerDetailPage() {
       assignedOrders,
       latestOrder,
     };
-  }, [jobs]);
+  }, [jobs, timezone]);
 
   if (loading) {
     return (
@@ -92,13 +91,18 @@ export default function CustomerDetailPage() {
     );
   }
 
+  const fullName = getCustomerFullName(customer);
+  const companyName = customer.companyName?.trim() || "";
+  const headerTitle = fullName || companyName || customer.name || "Unnamed Customer";
+  const profileSub = companyName || "Individual Client";
+
   return (
     <AppLayout title="Customer Detail">
       <div style={styles.page}>
         <div style={styles.topBar}>
           <div>
             <div style={styles.eyebrow}>Customer profile</div>
-            <h1 style={styles.pageTitle}>{customer.name || "Unnamed Customer"}</h1>
+            <h1 style={styles.pageTitle}>{headerTitle}</h1>
             <p style={styles.pageSubtitle}>
               View customer details, lead information, address, and job history.
             </p>
@@ -124,15 +128,11 @@ export default function CustomerDetailPage() {
         <div style={styles.heroGrid}>
           <div style={styles.profileCard}>
             <div style={styles.profileHeader}>
-              <div style={styles.avatar}>{getInitial(customer.name)}</div>
+              <div style={styles.avatar}>{getInitial(headerTitle)}</div>
 
               <div>
-                <div style={styles.customerName}>
-                  {customer.name || "Unnamed Customer"}
-                </div>
-                <div style={styles.customerSub}>
-                  {customer.companyName || "Individual Client"}
-                </div>
+                <div style={styles.customerName}>{headerTitle}</div>
+                <div style={styles.customerSub}>{profileSub}</div>
               </div>
             </div>
 
@@ -163,8 +163,8 @@ export default function CustomerDetailPage() {
             </div>
 
             <div style={styles.detailsGrid}>
-              <InfoItem label="Full name" value={customer.name || "-"} />
-              <InfoItem label="Company name" value={customer.companyName || "-"} />
+              <InfoItem label="Full name" value={fullName || "-"} />
+              <InfoItem label="Company name" value={companyName || "-"} />
               <InfoItem label="Phone number" value={customer.phone || "-"} />
               <InfoItem label="Email" value={customer.email || "-"} />
               <InfoItem label="Lead source" value={customer.leadSource || "-"} />
@@ -234,7 +234,7 @@ export default function CustomerDetailPage() {
                         {job.status === "completed" ? "✓" : "▣"}
                       </span>
                       <span style={styles.scheduleDate}>
-                        {formatSchedule(job.serviceDate, job.serviceTime)}
+                        {formatSchedule(job.serviceDate, job.serviceTime, timezone)}
                       </span>
                     </div>
 
@@ -287,6 +287,23 @@ export default function CustomerDetailPage() {
   );
 }
 
+function getCustomerFullName(customer) {
+  const first = (customer?.firstName || "").trim();
+  const last = (customer?.lastName || "").trim();
+  const combined = [first, last].filter(Boolean).join(" ").trim();
+
+  if (combined) return combined;
+
+  const company = (customer?.companyName || "").trim();
+  const name = (customer?.name || "").trim();
+
+  if (name && company && name.toLowerCase() === company.toLowerCase()) {
+    return "";
+  }
+
+  return name || "";
+}
+
 function MetaBlock({ label, value }) {
   return (
     <div style={styles.metaBlock}>
@@ -323,28 +340,17 @@ function getInitial(name = "") {
   return name.trim()?.charAt(0)?.toUpperCase() || "C";
 }
 
-function formatDateTime(dateString, timeString) {
+function formatDateTime(dateString, timeString, timezone) {
   if (!dateString) return "-";
 
-  const dateOnly = String(dateString).includes("T")
-    ? String(dateString).split("T")[0]
-    : String(dateString);
-
-  return timeString ? `${dateOnly} · ${timeString}` : dateOnly;
+  const formattedDate = formatDateForDisplay(dateString, timezone);
+  return timeString ? `${formattedDate} · ${timeString}` : formattedDate;
 }
 
-function formatSchedule(dateString, timeString) {
+function formatSchedule(dateString, timeString, timezone) {
   if (!dateString) return "-";
 
-  const date = new Date(dateString);
-  if (Number.isNaN(date.getTime())) return String(dateString);
-
-  const formattedDate = date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "2-digit",
-    year: "numeric",
-  });
-
+  const formattedDate = formatDateForDisplay(dateString, timezone);
   return timeString ? `${formattedDate}, ${timeString}` : formattedDate;
 }
 
@@ -386,7 +392,7 @@ function getStatusBadge(status) {
   return {
     ...styles.statusBadgeBase,
     background: "#f3f4f6",
-    color: "#6b7280",
+    color: "#475569",
     border: "1px solid #e5e7eb",
   };
 }
@@ -395,7 +401,25 @@ const styles = {
   page: {
     display: "grid",
     gap: 20,
-    paddingBottom: 24,
+    paddingBottom: 28,
+  },
+
+  loadingCard: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 24,
+    padding: 24,
+    color: "#475569",
+    fontWeight: 700,
+  },
+
+  emptyCard: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 24,
+    padding: 24,
+    color: "#475569",
+    fontWeight: 700,
   },
 
   topBar: {
@@ -409,176 +433,174 @@ const styles = {
   eyebrow: {
     fontSize: 13,
     fontWeight: 800,
-    color: "#64748b",
+    letterSpacing: "0.08em",
     textTransform: "uppercase",
-    letterSpacing: "0.06em",
+    color: "#64748b",
     marginBottom: 8,
   },
 
   pageTitle: {
     margin: 0,
-    fontSize: 38,
+    fontSize: 32,
     lineHeight: 1.05,
-    fontWeight: 850,
+    fontWeight: 900,
     color: "#0f172a",
     letterSpacing: "-0.03em",
   },
 
   pageSubtitle: {
-    margin: "10px 0 0 0",
-    fontSize: 16,
+    marginTop: 10,
     color: "#64748b",
+    fontSize: 14,
     lineHeight: 1.6,
-    maxWidth: 780,
   },
 
   topActions: {
     display: "flex",
     gap: 12,
-    flexWrap: "wrap",
   },
 
   primaryBtn: {
-    padding: "12px 16px",
+    padding: "12px 18px",
     border: "none",
-    borderRadius: 12,
+    borderRadius: 14,
     background: "#2563eb",
     color: "#fff",
-    cursor: "pointer",
     fontWeight: 800,
     fontSize: 14,
+    cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(37,99,235,0.18)",
   },
 
   secondaryBtn: {
-    padding: "12px 16px",
+    padding: "12px 18px",
     border: "1px solid #d1d5db",
-    borderRadius: 12,
+    borderRadius: 14,
     background: "#fff",
     color: "#111827",
-    cursor: "pointer",
     fontWeight: 700,
     fontSize: 14,
+    cursor: "pointer",
   },
 
   heroGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.6fr) minmax(300px, 0.9fr)",
+    gridTemplateColumns: "1.75fr 1fr",
     gap: 18,
-    alignItems: "stretch",
+    alignItems: "start",
   },
 
   profileCard: {
     background: "#fff",
     border: "1px solid #e5e7eb",
-    borderRadius: 20,
-    padding: 22,
+    borderRadius: 24,
+    padding: 20,
     boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
-    display: "grid",
-    gap: 18,
   },
 
   profileHeader: {
     display: "flex",
     alignItems: "center",
     gap: 16,
+    marginBottom: 18,
   },
 
   avatar: {
     width: 68,
     height: 68,
-    borderRadius: "999px",
-    background: "#163B4D",
+    borderRadius: "50%",
+    background: "#123d57",
     color: "#fff",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: 24,
-    fontWeight: 800,
+    fontSize: 32,
+    fontWeight: 900,
     flexShrink: 0,
   },
 
   customerName: {
-    fontSize: 28,
-    fontWeight: 850,
+    fontSize: 24,
+    fontWeight: 900,
     color: "#0f172a",
     lineHeight: 1.1,
   },
 
   customerSub: {
     marginTop: 6,
-    fontSize: 14,
+    fontSize: 16,
     color: "#64748b",
   },
 
   profileMetaGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
+    gridTemplateColumns: "1fr 1fr",
+    gap: 14,
   },
 
   metaBlock: {
     background: "#f8fafc",
-    border: "1px solid #e5e7eb",
-    borderRadius: 14,
-    padding: 14,
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    padding: 16,
   },
 
   metaLabel: {
     fontSize: 12,
     fontWeight: 800,
+    letterSpacing: "0.08em",
     textTransform: "uppercase",
-    letterSpacing: "0.05em",
     color: "#64748b",
-    marginBottom: 8,
+    marginBottom: 10,
   },
 
   metaValue: {
-    fontSize: 16,
-    fontWeight: 700,
-    color: "#111827",
+    fontSize: 15,
+    fontWeight: 800,
+    color: "#0f172a",
+    lineHeight: 1.5,
     wordBreak: "break-word",
   },
 
   summaryCard: {
     background: "#fff",
     border: "1px solid #e5e7eb",
-    borderRadius: 20,
-    padding: 22,
+    borderRadius: 24,
+    padding: 20,
     boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
-    display: "grid",
-    gap: 16,
   },
 
   summaryTitle: {
-    fontSize: 18,
-    fontWeight: 850,
+    fontSize: 20,
+    fontWeight: 900,
     color: "#0f172a",
+    marginBottom: 18,
   },
 
   summaryList: {
     display: "grid",
-    gap: 12,
+    gap: 0,
   },
 
   summaryRow: {
     display: "flex",
     justifyContent: "space-between",
-    gap: 12,
     alignItems: "center",
-    padding: "12px 0",
-    borderBottom: "1px solid #f1f5f9",
+    padding: "18px 0",
+    borderBottom: "1px solid #e5e7eb",
+    gap: 12,
   },
 
   summaryLabel: {
-    fontSize: 14,
     color: "#64748b",
+    fontSize: 14,
     fontWeight: 600,
   },
 
   summaryValue: {
-    fontSize: 15,
-    color: "#111827",
-    fontWeight: 800,
+    color: "#0f172a",
+    fontSize: 14,
+    fontWeight: 900,
     textAlign: "right",
   },
 
@@ -592,8 +614,8 @@ const styles = {
   card: {
     background: "#fff",
     border: "1px solid #e5e7eb",
-    borderRadius: 20,
-    padding: 22,
+    borderRadius: 24,
+    padding: 20,
     boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
   },
 
@@ -603,169 +625,164 @@ const styles = {
     alignItems: "center",
     gap: 12,
     marginBottom: 16,
-    flexWrap: "wrap",
-  },
-
-  sectionHeaderRight: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
   },
 
   sectionTitle: {
     margin: 0,
     fontSize: 20,
-    fontWeight: 850,
+    fontWeight: 900,
     color: "#0f172a",
   },
 
-  sectionSub: {
-    fontSize: 13,
-    color: "#64748b",
-    fontWeight: 700,
+  sectionHeaderRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
   },
 
   filterChip: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 40,
-    padding: "0 16px",
+    padding: "8px 12px",
     borderRadius: 999,
-    background: "#f3f4f6",
-    color: "#111827",
-    fontSize: 14,
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    fontSize: 13,
     fontWeight: 700,
+    color: "#475569",
   },
 
   plusBtn: {
-    width: 40,
-    height: 40,
+    width: 36,
+    height: 36,
+    borderRadius: "50%",
     border: "none",
-    borderRadius: 12,
-    background: "transparent",
-    color: "#2f7d1f",
-    fontSize: 30,
+    background: "#2563eb",
+    color: "#fff",
+    fontSize: 24,
     lineHeight: 1,
     cursor: "pointer",
+    boxShadow: "0 8px 18px rgba(37,99,235,0.18)",
   },
 
   detailsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: 12,
+    gridTemplateColumns: "1fr 1fr",
+    gap: 14,
   },
 
   infoItem: {
     background: "#f8fafc",
-    border: "1px solid #e5e7eb",
-    borderRadius: 14,
-    padding: 14,
+    border: "1px solid #e2e8f0",
+    borderRadius: 18,
+    padding: 16,
+    minHeight: 76,
   },
 
   infoLabel: {
     fontSize: 12,
     fontWeight: 800,
+    letterSpacing: "0.08em",
     textTransform: "uppercase",
-    letterSpacing: "0.05em",
     color: "#64748b",
-    marginBottom: 8,
+    marginBottom: 10,
   },
 
   infoValue: {
     fontSize: 15,
-    fontWeight: 700,
-    color: "#111827",
-    lineHeight: 1.5,
+    fontWeight: 800,
+    color: "#0f172a",
+    lineHeight: 1.6,
     wordBreak: "break-word",
   },
 
+  emptyInline: {
+    padding: 20,
+    borderRadius: 18,
+    background: "#f8fafc",
+    border: "1px dashed #cbd5e1",
+    color: "#64748b",
+    textAlign: "center",
+    fontWeight: 700,
+  },
+
   historyTableWrap: {
-    border: "1px solid #dbe2ea",
-    borderRadius: 14,
-    overflow: "hidden",
-    background: "#fff",
+    display: "grid",
+    gap: 0,
   },
 
   historyHead: {
     display: "grid",
-    gridTemplateColumns: "1.2fr 2fr 1.2fr 120px",
+    gridTemplateColumns: "1.1fr 1.5fr 1fr auto",
     gap: 16,
-    padding: "14px 16px",
-    background: "#f8fafc",
-    borderBottom: "1px solid #e5e7eb",
-    fontSize: 14,
+    padding: "0 10px 12px 10px",
+    color: "#64748b",
+    fontSize: 13,
     fontWeight: 800,
-    color: "#163B4D",
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
   },
 
   historyRow: {
     display: "grid",
-    gridTemplateColumns: "1.2fr 2fr 1.2fr 120px",
+    gridTemplateColumns: "1.1fr 1.5fr 1fr auto",
     gap: 16,
-    padding: "18px 16px",
     alignItems: "center",
+    padding: "16px 10px",
     cursor: "pointer",
-    background: "#fff",
   },
 
   historyRowBorder: {
-    borderBottom: "1px solid #eef2f7",
+    borderBottom: "1px solid #e5e7eb",
   },
 
   scheduleCol: {
     minWidth: 0,
-    display: "grid",
-    gap: 8,
   },
 
   scheduleTop: {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    minWidth: 0,
+    marginBottom: 6,
   },
 
   scheduleIcon: {
-    fontSize: 18,
-    color: "#65a30d",
-    lineHeight: 1,
-    flexShrink: 0,
+    fontSize: 16,
+    color: "#334155",
+    fontWeight: 900,
   },
 
   scheduleDate: {
-    fontSize: 15,
-    fontWeight: 800,
+    fontSize: 14,
     color: "#0f172a",
-    lineHeight: 1.35,
-    wordBreak: "break-word",
+    fontWeight: 800,
   },
 
   scheduleSub: {
     fontSize: 13,
-    color: "#64748b",
-    paddingLeft: 28,
+    color: "#16a34a",
+    fontWeight: 700,
+    paddingLeft: 26,
   },
 
   titleCol: {
     minWidth: 0,
-    display: "grid",
-    gap: 6,
   },
 
   titleMain: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: 800,
     color: "#0f172a",
-    lineHeight: 1.3,
-    wordBreak: "break-word",
+    marginBottom: 6,
+    lineHeight: 1.4,
   },
 
   titleSub: {
-    fontSize: 14,
+    fontSize: 13,
     color: "#64748b",
-    lineHeight: 1.45,
-    wordBreak: "break-word",
+    lineHeight: 1.6,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   assignedCol: {
@@ -779,77 +796,53 @@ const styles = {
   },
 
   assignedAvatar: {
-    width: 28,
-    height: 28,
-    borderRadius: "999px",
-    background: "#163B4D",
+    width: 34,
+    height: 34,
+    borderRadius: "50%",
+    background: "#123d57",
     color: "#fff",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: 12,
-    fontWeight: 800,
+    fontSize: 14,
+    fontWeight: 900,
     flexShrink: 0,
   },
 
   assignedName: {
-    fontSize: 15,
+    fontSize: 14,
+    color: "#0f172a",
     fontWeight: 700,
-    color: "#111827",
-    wordBreak: "break-word",
+    lineHeight: 1.4,
   },
 
   unassignedBox: {
     display: "flex",
     alignItems: "center",
-    gap: 10,
+    gap: 8,
+    color: "#94a3b8",
+    fontWeight: 700,
   },
 
   unassignedIcon: {
-    color: "#ef4444",
-    fontSize: 18,
-    lineHeight: 1,
-    flexShrink: 0,
+    fontSize: 16,
   },
 
   unassignedText: {
-    fontSize: 15,
-    color: "#64748b",
-    fontWeight: 600,
+    fontSize: 13,
   },
 
   rowActionCol: {
     display: "flex",
     justifyContent: "flex-end",
-    alignItems: "center",
   },
 
   statusBadgeBase: {
-    padding: "6px 12px",
+    padding: "7px 12px",
     borderRadius: 999,
     fontSize: 12,
     fontWeight: 800,
     whiteSpace: "nowrap",
-    display: "inline-block",
-  },
-
-  loadingCard: {
-    background: "#fff",
-    borderRadius: 20,
-    padding: 24,
-    border: "1px solid #e5e7eb",
-  },
-
-  emptyCard: {
-    background: "#fff",
-    borderRadius: 20,
-    padding: 24,
-    border: "1px solid #e5e7eb",
-    color: "#6b7280",
-  },
-
-  emptyInline: {
-    color: "#6b7280",
-    fontSize: 14,
+    textTransform: "capitalize",
   },
 };

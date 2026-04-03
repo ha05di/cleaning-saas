@@ -29,6 +29,11 @@ model Company {
   cleanerAvailabilities CleanerAvailability[]
   companyUsers          CompanyUser[]
 
+  // 新增：公司级设置相关
+  workspaceSettings      WorkspaceSettings[]
+  workspaceBusinessHours WorkspaceBusinessHour[]
+  workspaceTaxProfiles   WorkspaceTaxProfile[]
+
   workspaces       Workspace[] @relation("CompanyWorkspaces")
   defaultWorkspace Workspace?  @relation("CompanyDefaultWorkspace", fields: [defaultWorkspaceId], references: [id], onDelete: SetNull)
 
@@ -58,6 +63,11 @@ model Workspace {
   cleanerAvailabilities CleanerAvailability[]
   companyUsers          CompanyUser[]
 
+  // 新增：workspace 级设置相关
+  settings      WorkspaceSettings?
+  businessHours WorkspaceBusinessHour[]
+  taxProfile    WorkspaceTaxProfile?
+
   @@index([companyId])
   @@index([slug])
   @@index([isActive])
@@ -80,6 +90,14 @@ model CompanyUser {
   updatedAt      DateTime  @default(now()) @updatedAt
   lastLoginAt    DateTime?
 
+  // 新增字段
+  invitedAt       DateTime?
+  acceptedAt      DateTime?
+  avatarUrl       String?
+  phone           String?
+  permissionsJson Json?
+  isPrimaryOwner  Boolean   @default(false)
+
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
@@ -91,7 +109,7 @@ model CompanyUser {
 }
 
 model Customer {
-  id          Int      @id @default(autoincrement())
+  id          Int     @id @default(autoincrement())
   companyId   Int
   workspaceId Int?
   name        String
@@ -99,7 +117,7 @@ model Customer {
   address     String?
   notes       String?
 
-  // 新增字段
+  // 原有新增字段
   email       String?
   companyName String?
   leadSource  String?
@@ -109,6 +127,25 @@ model Customer {
   province    String?
   postalCode  String?
   country     String?
+
+  // 补充字段
+  title                 String?
+  firstName             String?
+  lastName              String?
+  role                  String?
+  state                 String?
+  billingSameAsProperty Boolean?  @default(true)
+  billingStreet1        String?
+  billingStreet2        String?
+  billingCity           String?
+  billingState          String?
+  billingPostalCode     String?
+  billingCountry        String?
+  tags                  Json?
+  isActive              Boolean   @default(true)
+  isArchived            Boolean   @default(false)
+  archivedAt            DateTime?
+  deletedAt             DateTime?
 
   source      String?
   externalRef String?
@@ -127,6 +164,8 @@ model Customer {
   @@index([leadSource])
   @@index([source])
   @@index([externalRef])
+  @@index([isActive])
+  @@index([isArchived])
 }
 
 model Team {
@@ -142,6 +181,11 @@ model Team {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @default(now()) @updatedAt
 
+  // 补充字段
+  isArchived Boolean   @default(false)
+  archivedAt DateTime?
+  deletedAt  DateTime?
+
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   workspace Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   cleaners  Cleaner[]
@@ -151,20 +195,21 @@ model Team {
   @@index([isActive])
   @@index([source])
   @@index([externalRef])
+  @@index([isArchived])
 }
 
 model Cleaner {
-  id          Int      @id @default(autoincrement())
+  id          Int     @id @default(autoincrement())
   companyId   Int
   workspaceId Int?
   name        String
   phone       String?
-  status      String   @default("active")
+  status      String  @default("active")
   team        String? // 保留，兼容你当前前端/后端
   teamId      Int?
   notes       String?
 
-  // 新增字段
+  // 原有新增字段
   email         String?
   avatarUrl     String?
   streetAddress String?
@@ -173,7 +218,20 @@ model Cleaner {
   postalCode    String?
   country       String?
   labourCost    Float?
-  role          String?  @default("Cleaner")
+  role          String? @default("Cleaner")
+
+  // 补充字段
+  employmentType      String?
+  hourlyRate          Float?
+  defaultStartTime    String?
+  defaultEndTime      String?
+  maxJobsPerDay       Int?
+  serviceArea         String?
+  color               String?
+  isVisibleOnSchedule Boolean   @default(true)
+  isArchived          Boolean   @default(false)
+  archivedAt          DateTime?
+  deletedAt           DateTime?
 
   source      String?
   externalRef String?
@@ -195,6 +253,8 @@ model Cleaner {
   @@index([role])
   @@index([source])
   @@index([externalRef])
+  @@index([isVisibleOnSchedule])
+  @@index([isArchived])
 }
 
 model CleanerAvailability {
@@ -239,12 +299,32 @@ model Job {
   notes       String?
   status      String   @default("pending")
 
-  // 新增字段
+  // 原有新增字段
   title        String?
   endDate      DateTime?
   endTime      String?
   instructions String?
-  anytime      Boolean  @default(false)
+  anytime      Boolean   @default(false)
+
+  // 补充字段：排班 / 时长
+  durationMinutes Int?
+
+  // 补充字段：财务
+  price          Float?
+  subtotal       Float?
+  discountAmount Float?
+  taxAmount      Float?
+  total          Float?
+  paidAmount     Float?
+  balanceDue     Float?
+  paymentStatus  String?
+  paymentMethod  String?
+  invoiceNumber  String?
+
+  // 补充字段：软删除 / 归档
+  isArchived Boolean   @default(false)
+  archivedAt DateTime?
+  deletedAt  DateTime?
 
   orderNo     String?
   source      String?
@@ -271,4 +351,89 @@ model Job {
   @@index([orderNo])
   @@index([source])
   @@index([externalRef])
+  @@index([invoiceNumber])
+  @@index([paymentStatus])
+  @@index([isArchived])
+}
+
+model WorkspaceSettings {
+  id          Int @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int @unique
+
+  companyName String?
+  website     String?
+  email       String?
+  phone       String?
+
+  street1 String?
+  street2 String?
+  city    String?
+  state   String?
+  zipCode String?
+  country String?
+
+  timezone          String?
+  dateFormat        String?
+  timeFormat        String?
+  firstDayOfWeek    String?
+  showBusinessHours Boolean @default(true)
+
+  logoUrl          String?
+  brandColor       String?
+  secondaryColor   String?
+  currency         String?
+  language         String?
+  bookingEnabled   Boolean @default(false)
+  publicBookingUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([workspaceId])
+}
+
+model WorkspaceBusinessHour {
+  id          Int @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int
+
+  dayOfWeek Int
+  isOpen    Boolean @default(false)
+  startTime String?
+  endTime   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, dayOfWeek])
+  @@index([companyId])
+  @@index([workspaceId])
+  @@index([dayOfWeek])
+}
+
+model WorkspaceTaxProfile {
+  id          Int @id @default(autoincrement())
+  companyId   Int
+  workspaceId Int @unique
+
+  taxName   String?
+  taxNumber String?
+  taxRate   Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([companyId])
+  @@index([workspaceId])
 }

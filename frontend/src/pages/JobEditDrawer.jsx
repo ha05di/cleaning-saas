@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { API_BASE_URL } from "../config";
+import { DEFAULT_COMPANY_TIMEZONE, normalizeTimeZone, getDateKeyInTimeZone } from "../utils/time";
 
 const API = API_BASE_URL;
 
@@ -28,6 +29,12 @@ export default function JobEditDrawer({
   const token = localStorage.getItem("token");
   const [form, setForm] = useState(INITIAL_FORM);
   const [saving, setSaving] = useState(false);
+  const [companyTimezone, setCompanyTimezone] = useState(DEFAULT_COMPANY_TIMEZONE);
+
+  useEffect(() => {
+    if (!open) return;
+    fetchCompanySettings();
+  }, [open]);
 
   useEffect(() => {
     if (!open || !job) return;
@@ -35,9 +42,9 @@ export default function JobEditDrawer({
     setForm({
       title: job.title || "",
       serviceType: job.serviceType || "",
-      serviceDate: toDateInput(job.serviceDate),
+      serviceDate: toDateInput(job.serviceDate, companyTimezone),
       serviceTime: job.serviceTime || "",
-      endDate: toDateInput(job.endDate),
+      endDate: toDateInput(job.endDate, companyTimezone),
       endTime: job.endTime || "",
       address: job.address || "",
       notes: job.notes || "",
@@ -45,7 +52,7 @@ export default function JobEditDrawer({
       cleanerId: job.cleanerId ? String(job.cleanerId) : "",
       status: job.status || "pending",
     });
-  }, [open, job]);
+  }, [open, job, companyTimezone]);
 
   useEffect(() => {
     if (!open) return;
@@ -62,6 +69,19 @@ export default function JobEditDrawer({
       document.body.style.overflow = "";
     };
   }, [open, onClose]);
+
+
+  async function fetchCompanySettings() {
+    try {
+      const res = await axios.get(`${API}/api/settings/company`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const settings = res.data?.settings || {};
+      setCompanyTimezone(normalizeTimeZone(settings.timezone));
+    } catch (error) {
+      console.error("Failed to fetch company settings", error);
+    }
+  }
 
   function handleChange(e) {
     const { name, value } = e.target;
@@ -255,10 +275,8 @@ export default function JobEditDrawer({
   );
 }
 
-function toDateInput(value) {
-  if (!value) return "";
-  const str = String(value);
-  return str.includes("T") ? str.split("T")[0] : str;
+function toDateInput(value, timeZone = DEFAULT_COMPANY_TIMEZONE) {
+  return getDateKeyInTimeZone(value, timeZone);
 }
 
 const styles = {

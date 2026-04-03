@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import { API_BASE_URL } from "../config";
+import {
+  getDateKeyInTimeZone,
+  formatDateForDisplay,
+  formatPrettyDateInTimeZone,
+  isSameMonthInTimeZone,
+  compareJobsBySchedule,
+  getTodayKeyInTimeZone,
+  getHourInTimeZone,
+  getWeekdayLabels,
+} from "../utils/time";
+import { useCompany } from "../context/CompanyContext";
 
 const API = API_BASE_URL;
 
@@ -12,10 +23,30 @@ export default function DashboardPage() {
 
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const { timezone: companyTimezone, firstDayOfWeek: companyFirstDayOfWeek } = useCompany();
+  const quickCreateRef = useRef(null);
 
   useEffect(() => {
     fetchJobs();
   }, []);
+
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (
+        quickCreateRef.current &&
+        !quickCreateRef.current.contains(e.target)
+      ) {
+        setQuickCreateOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
 
   async function fetchJobs() {
     try {
@@ -31,11 +62,19 @@ export default function DashboardPage() {
     }
   }
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = useMemo(() => getTodayKeyInTimeZone(companyTimezone), [companyTimezone]);
+
+  const weekStartLabel = useMemo(() => {
+    return companyFirstDayOfWeek === "Monday" ? "Monday" : "Sunday";
+  }, [companyFirstDayOfWeek]);
+
+  const orderedWeekdays = useMemo(() => {
+    return getWeekdayLabels(companyFirstDayOfWeek, "short").join(" · ");
+  }, [companyFirstDayOfWeek]);
 
   const dashboardData = useMemo(() => {
     const todayList = jobs.filter(
-      (job) => job.serviceDate && job.serviceDate.split("T")[0] === today
+      (job) => getDateKeyInTimeZone(job.serviceDate, companyTimezone) === today
     );
 
     const pendingList = jobs.filter((job) => job.status === "pending");
@@ -51,7 +90,7 @@ export default function DashboardPage() {
 
     const overdueList = jobs.filter((job) => {
       if (!job.serviceDate) return false;
-      const jobDate = job.serviceDate.split("T")[0];
+      const jobDate = getDateKeyInTimeZone(job.serviceDate, companyTimezone);
       return (
         jobDate < today &&
         job.status !== "completed" &&
@@ -62,14 +101,10 @@ export default function DashboardPage() {
     const upcomingList = jobs
       .filter((job) => {
         if (!job.serviceDate) return false;
-        const jobDate = job.serviceDate.split("T")[0];
+        const jobDate = getDateKeyInTimeZone(job.serviceDate, companyTimezone);
         return jobDate >= today && job.status !== "completed";
       })
-      .sort((a, b) => {
-        const aDate = new Date(`${a.serviceDate || ""} ${a.serviceTime || ""}`);
-        const bDate = new Date(`${b.serviceDate || ""} ${b.serviceTime || ""}`);
-        return aDate - bDate;
-      })
+      .sort((a, b) => compareJobsBySchedule(a, b, companyTimezone))
       .slice(0, 5);
 
     const recentJobs = [...jobs]
@@ -83,13 +118,7 @@ export default function DashboardPage() {
     const monthRevenue = jobs
       .filter((job) => {
         if (!job.serviceDate) return false;
-        const d = new Date(job.serviceDate);
-        const now = new Date();
-        return (
-          d.getFullYear() === now.getFullYear() &&
-          d.getMonth() === now.getMonth() &&
-          job.status === "completed"
-        );
+        return isSameMonthInTimeZone(job.serviceDate, new Date(), companyTimezone) && job.status === "completed";
       })
       .reduce((sum, job) => sum + Number(job.price || job.total || 0), 0);
 
@@ -105,9 +134,13 @@ export default function DashboardPage() {
       upcomingList,
       recentJobs,
     };
-  }, [jobs, today]);
+  }, [jobs, today, companyTimezone]);
 
-  const greeting = getGreeting();
+  const greeting = getHourInTimeZone(companyTimezone) < 12
+    ? "Good morning"
+    : getHourInTimeZone(companyTimezone) < 18
+      ? "Good afternoon"
+      : "Good evening";
   const userName = getStoredUserName();
 
   return (
@@ -116,10 +149,60 @@ export default function DashboardPage() {
         <div style={styles.loadingCard}>Loading dashboard...</div>
       ) : (
         <div style={styles.page}>
+          <div style={styles.topActionsBar}>
+            <div>
+              <div style={styles.topActionsEyebrow}>Quick actions</div>
+              <div style={styles.topActionsTitle}>
+                Create new work faster from one place
+              </div>
+            </div>
+
+            <div style={styles.quickCreateWrap} ref={quickCreateRef}>
+              <button
+                type="button"
+                style={styles.quickCreateBtn}
+                onClick={() => setQuickCreateOpen((prev) => !prev)}
+              >
+                + Quick Create
+              </button>
+
+              {quickCreateOpen && (
+                <div style={styles.quickCreateMenu}>
+                  <button
+                    type="button"
+                    style={styles.quickCreateItem}
+                    onClick={() => navigate("/jobs/new")}
+                  >
+                    New Job
+                  </button>
+
+                  <button
+                    type="button"
+                    style={styles.quickCreateItem}
+                    onClick={() => navigate("/customers/new")}
+                  >
+                    New Customer
+                  </button>
+
+                  <button
+                    type="button"
+                    style={styles.quickCreateItem}
+                    onClick={() => navigate("/cleaners/new")}
+                  >
+                    New Cleaner
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
           <div style={styles.hero}>
             <div style={styles.heroLeft}>
               <div style={styles.heroBadge}>Operations Overview</div>
-              <div style={styles.heroDate}>{formatPrettyDate(new Date())}</div>
+              <div style={styles.heroDate}>{formatPrettyDateInTimeZone(new Date(), companyTimezone)}</div>
+              <div style={styles.heroMeta}>
+                {companyTimezone} · Week starts on {weekStartLabel} · {orderedWeekdays}
+              </div>
               <h1 style={styles.heroTitle}>
                 {greeting}
                 {userName ? `, ${userName}` : ""}
@@ -309,7 +392,7 @@ export default function DashboardPage() {
                           </div>
 
                           <div style={styles.appointmentMeta}>
-                            {formatDate(job.serviceDate)}
+                            {formatDateForDisplay(job.serviceDate, companyTimezone)}
                             {job.serviceTime ? ` · ${job.serviceTime}` : ""}
                             {job.serviceType ? ` · ${job.serviceType}` : ""}
                           </div>
@@ -354,7 +437,7 @@ export default function DashboardPage() {
                             {job.customer?.name || "Unknown"}
                           </strong>
                           <span style={styles.jobMeta}>
-                            {formatDate(job.serviceDate)}
+                            {formatDateForDisplay(job.serviceDate, companyTimezone)}
                             {job.serviceTime ? ` · ${job.serviceTime}` : ""}
                             {job.serviceType ? ` · ${job.serviceType}` : ""}
                           </span>
@@ -517,25 +600,8 @@ function MiniMetric({ label, value, note }) {
   );
 }
 
-function formatDate(dateString) {
-  if (!dateString) return "";
-  return dateString.split("T")[0];
-}
-
-function formatPrettyDate(date) {
-  try {
-    return date.toLocaleDateString(undefined, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-    });
-  } catch {
-    return "";
-  }
-}
-
-function getGreeting() {
-  const hour = new Date().getHours();
+function getGreeting(timeZone = DEFAULT_COMPANY_TIMEZONE) {
+  const hour = getHourInTimeZone(timeZone);
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
@@ -587,7 +653,7 @@ function getStatusBadge(status) {
     status === "active"
   ) {
     return {
-      background: "#ede9fe",
+      background: "#f3e8ff",
       color: "#7c3aed",
       padding: "5px 10px",
       borderRadius: "999px",
@@ -598,10 +664,10 @@ function getStatusBadge(status) {
     };
   }
 
-  if (status === "pending") {
+  if (status === "cancelled") {
     return {
-      background: "#fef3c7",
-      color: "#b45309",
+      background: "#fee2e2",
+      color: "#b91c1c",
       padding: "5px 10px",
       borderRadius: "999px",
       fontSize: "12px",
@@ -613,7 +679,7 @@ function getStatusBadge(status) {
 
   return {
     background: "#f3f4f6",
-    color: "#6b7280",
+    color: "#374151",
     padding: "5px 10px",
     borderRadius: "999px",
     fontSize: "12px",
@@ -625,233 +691,308 @@ function getStatusBadge(status) {
 
 const styles = {
   page: {
-    display: "grid",
-    gap: "20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "22px",
   },
 
   loadingCard: {
-    background: "#fff",
-    borderRadius: "20px",
-    padding: "24px",
+    background: "#ffffff",
     border: "1px solid #e5e7eb",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
+    borderRadius: "20px",
+    padding: "20px 22px",
+    color: "#475569",
+    fontWeight: 600,
+  },
+
+  topActionsBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "16px",
+    flexWrap: "wrap",
+    background: "#ffffff",
+    border: "1px solid #e5e7eb",
+    borderRadius: "18px",
+    padding: "18px 20px",
+  },
+
+  topActionsEyebrow: {
+    fontSize: "12px",
+    fontWeight: 800,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    color: "#64748b",
+    marginBottom: "6px",
+  },
+
+  topActionsTitle: {
+    fontSize: "16px",
+    fontWeight: 700,
+    color: "#0f172a",
+  },
+
+  quickCreateWrap: {
+    position: "relative",
+  },
+
+  quickCreateBtn: {
+    height: "44px",
+    padding: "0 18px",
+    borderRadius: "12px",
+    border: "none",
+    background: "#2563eb",
+    color: "#ffffff",
+    fontWeight: 800,
+    fontSize: "14px",
+    cursor: "pointer",
+    boxShadow: "0 10px 24px rgba(37, 99, 235, 0.18)",
+  },
+
+  quickCreateMenu: {
+    position: "absolute",
+    top: "52px",
+    right: 0,
+    minWidth: "190px",
+    background: "#ffffff",
+    border: "1px solid #e5e7eb",
+    borderRadius: "14px",
+    boxShadow: "0 16px 40px rgba(15, 23, 42, 0.12)",
+    padding: "8px",
+    zIndex: 30,
+  },
+
+  quickCreateItem: {
+    width: "100%",
+    border: "none",
+    background: "transparent",
+    textAlign: "left",
+    padding: "11px 12px",
+    borderRadius: "10px",
+    color: "#0f172a",
+    fontWeight: 700,
+    cursor: "pointer",
+    fontSize: "14px",
   },
 
   hero: {
-    background:
-      "linear-gradient(135deg, #0f172a 0%, #1e293b 55%, #111827 100%)",
-    borderRadius: "28px",
-    padding: "28px",
-    color: "#fff",
     display: "grid",
-    gridTemplateColumns: "1.4fr 1fr",
-    gap: "20px",
-    boxShadow: "0 20px 50px rgba(15, 23, 42, 0.18)",
+    gridTemplateColumns: "1.5fr 0.9fr",
+    gap: "18px",
+    background: "linear-gradient(135deg, #071a44 0%, #182b51 100%)",
+    borderRadius: "30px",
+    padding: "28px",
+    color: "#ffffff",
+    boxShadow: "0 16px 40px rgba(15, 23, 42, 0.12)",
   },
 
   heroLeft: {
     display: "flex",
     flexDirection: "column",
     justifyContent: "center",
+    minHeight: "220px",
   },
 
   heroBadge: {
     display: "inline-flex",
-    alignItems: "center",
     alignSelf: "flex-start",
-    padding: "7px 12px",
+    padding: "8px 14px",
     borderRadius: "999px",
     background: "rgba(255,255,255,0.12)",
-    fontSize: "12px",
-    fontWeight: "700",
-    letterSpacing: "0.04em",
+    fontSize: "13px",
+    fontWeight: 700,
+    marginBottom: "18px",
   },
 
   heroDate: {
-    marginTop: "16px",
-    fontSize: "14px",
-    color: "rgba(255,255,255,0.76)",
+    fontSize: "15px",
+    color: "rgba(255,255,255,0.88)",
+    marginBottom: "10px",
   },
 
   heroTitle: {
-    margin: "8px 0 0",
-    fontSize: "40px",
+    margin: 0,
+    fontSize: "34px",
+    fontWeight: 800,
     lineHeight: 1.1,
-    fontWeight: "800",
-    letterSpacing: "-0.03em",
+    marginBottom: "14px",
+    letterSpacing: "-0.02em",
   },
 
   heroText: {
-    marginTop: "14px",
-    fontSize: "15px",
-    lineHeight: 1.7,
-    color: "rgba(255,255,255,0.8)",
+    margin: 0,
+    fontSize: "16px",
+    lineHeight: 1.8,
     maxWidth: "720px",
+    color: "rgba(255,255,255,0.92)",
   },
 
   heroStats: {
     display: "grid",
-    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-    gap: "12px",
-    alignContent: "center",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "10px",
   },
 
   heroMiniCard: {
-    background: "rgba(255,255,255,0.08)",
-    border: "1px solid rgba(255,255,255,0.12)",
-    borderRadius: "20px",
+    borderRadius: "22px",
     padding: "18px",
+    background: "rgba(255,255,255,0.10)",
+    border: "1px solid rgba(255,255,255,0.12)",
     backdropFilter: "blur(6px)",
   },
 
   heroMiniLabel: {
-    fontSize: "11px",
+    fontSize: "12px",
     textTransform: "uppercase",
-    letterSpacing: "0.16em",
-    color: "rgba(255,255,255,0.64)",
+    letterSpacing: "0.08em",
+    color: "rgba(255,255,255,0.75)",
+    marginBottom: "10px",
+    fontWeight: 700,
   },
 
   heroMiniValue: {
-    marginTop: "10px",
-    fontSize: "30px",
-    fontWeight: "800",
-    letterSpacing: "-0.03em",
+    fontSize: "28px",
+    fontWeight: 800,
+    marginBottom: "4px",
   },
 
   heroMiniSub: {
-    marginTop: "4px",
-    fontSize: "13px",
-    color: "rgba(255,255,255,0.72)",
+    fontSize: "14px",
+    color: "rgba(255,255,255,0.82)",
   },
 
   statsGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "16px",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "14px",
   },
 
   statCard: {
-    background: "#fff",
-    borderRadius: "20px",
-    padding: "22px",
+    background: "#ffffff",
     border: "1px solid #e5e7eb",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
+    borderRadius: "20px",
+    padding: "20px",
   },
 
   statTop: {
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: "16px",
+    justifyContent: "space-between",
+    gap: "12px",
   },
 
   statIconBox: {
-    width: "42px",
-    height: "42px",
-    borderRadius: "14px",
+    width: "38px",
+    height: "38px",
+    borderRadius: "12px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontWeight: "800",
     fontSize: "14px",
+    fontWeight: 700,
+    flexShrink: 0,
   },
 
   cardLabel: {
     fontSize: "14px",
     color: "#64748b",
-    marginBottom: "10px",
-    fontWeight: "600",
+    marginBottom: "12px",
   },
 
   cardValue: {
-    fontSize: "36px",
-    fontWeight: "800",
+    fontSize: "28px",
+    fontWeight: 800,
     color: "#0f172a",
-    letterSpacing: "-0.04em",
+    marginBottom: "10px",
+    lineHeight: 1,
   },
 
   cardSubtext: {
-    marginTop: "8px",
-    fontSize: "13px",
+    fontSize: "14px",
     color: "#64748b",
+    lineHeight: 1.5,
   },
 
   mainGrid: {
     display: "grid",
-    gridTemplateColumns: "minmax(0, 1.7fr) minmax(320px, 0.9fr)",
-    gap: "20px",
+    gridTemplateColumns: "1.45fr 0.85fr",
+    gap: "18px",
     alignItems: "start",
   },
 
   leftCol: {
-    display: "grid",
-    gap: "20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
   },
 
   rightCol: {
-    display: "grid",
-    gap: "20px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "18px",
   },
 
   sectionCard: {
-    background: "#fff",
+    background: "#ffffff",
     border: "1px solid #e5e7eb",
-    borderRadius: "22px",
-    padding: "22px",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
+    borderRadius: "24px",
+    padding: "20px",
   },
 
   sectionHeader: {
     display: "flex",
-    justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: "16px",
-    flexWrap: "wrap",
+    justifyContent: "space-between",
+    gap: "14px",
     marginBottom: "18px",
   },
 
   sectionTitle: {
     margin: 0,
-    fontSize: "26px",
-    fontWeight: "800",
+    fontSize: "18px",
+    fontWeight: 800,
     color: "#0f172a",
-    letterSpacing: "-0.03em",
+    marginBottom: "6px",
   },
 
   sectionSubtitle: {
-    marginTop: "6px",
-    fontSize: "13px",
+    fontSize: "14px",
     color: "#64748b",
+    lineHeight: 1.6,
   },
 
   primaryBtn: {
-    padding: "11px 16px",
-    borderRadius: "14px",
+    height: "42px",
+    padding: "0 16px",
     border: "none",
+    borderRadius: "12px",
     background: "#0f172a",
-    color: "#fff",
-    fontWeight: "700",
+    color: "#ffffff",
+    fontWeight: 700,
     cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 
   secondaryBtn: {
-    padding: "11px 16px",
-    borderRadius: "14px",
-    border: "1px solid #d1d5db",
-    background: "#fff",
+    height: "42px",
+    padding: "0 16px",
+    border: "1px solid #dbe2ea",
+    borderRadius: "12px",
+    background: "#ffffff",
     color: "#0f172a",
-    fontWeight: "700",
+    fontWeight: 700,
     cursor: "pointer",
+    whiteSpace: "nowrap",
   },
 
   workflowGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "14px",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "12px",
   },
 
   workflowCard: {
-    background: "#fff",
+    background: "#ffffff",
     border: "1px solid #e5e7eb",
     borderRadius: "18px",
     padding: "18px",
@@ -860,45 +1001,44 @@ const styles = {
   },
 
   workflowTopBar: {
+    height: "4px",
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
-    height: "4px",
   },
 
   workflowTitle: {
     fontSize: "14px",
     color: "#64748b",
-    fontWeight: "600",
-    marginTop: "6px",
+    fontWeight: 700,
+    marginTop: "8px",
+    marginBottom: "14px",
   },
 
   workflowValue: {
-    fontSize: "38px",
-    fontWeight: "800",
+    fontSize: "28px",
+    fontWeight: 800,
     color: "#0f172a",
-    letterSpacing: "-0.04em",
-    marginTop: "10px",
+    marginBottom: "8px",
   },
 
   workflowSubtitle: {
-    marginTop: "8px",
-    fontSize: "13px",
+    fontSize: "14px",
     color: "#64748b",
     lineHeight: 1.5,
   },
 
   metricsRow: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+    gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
     gap: "12px",
-    marginBottom: "16px",
+    marginBottom: "18px",
   },
 
   miniMetricCard: {
     background: "#f8fafc",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #e2e8f0",
     borderRadius: "16px",
     padding: "14px",
   },
@@ -906,45 +1046,51 @@ const styles = {
   miniMetricLabel: {
     fontSize: "13px",
     color: "#64748b",
-    fontWeight: "600",
+    fontWeight: 700,
+    marginBottom: "8px",
   },
 
   miniMetricValue: {
-    marginTop: "8px",
-    fontSize: "24px",
-    fontWeight: "800",
+    fontSize: "22px",
+    fontWeight: 800,
     color: "#0f172a",
-    letterSpacing: "-0.03em",
+    marginBottom: "6px",
   },
 
   miniMetricNote: {
-    marginTop: "4px",
     fontSize: "12px",
     color: "#94a3b8",
+    lineHeight: 1.5,
+  },
+
+  emptyLarge: {
+    padding: "20px",
+    textAlign: "center",
+    borderRadius: "16px",
+    background: "#f8fafc",
+    color: "#64748b",
+    border: "1px dashed #cbd5e1",
   },
 
   appointmentList: {
-    display: "grid",
+    display: "flex",
+    flexDirection: "column",
     gap: "12px",
   },
 
   appointmentCard: {
-    background: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "14px",
+    background: "#ffffff",
     border: "1px solid #e5e7eb",
     borderRadius: "18px",
     padding: "16px",
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "12px",
     cursor: "pointer",
-    transition: "all 0.2s ease",
   },
 
   appointmentLeft: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "6px",
     minWidth: 0,
   },
 
@@ -953,156 +1099,69 @@ const styles = {
     alignItems: "center",
     gap: "10px",
     flexWrap: "wrap",
+    marginBottom: "8px",
   },
 
   appointmentTitle: {
-    fontSize: "16px",
+    fontSize: "15px",
     color: "#0f172a",
   },
 
   appointmentMeta: {
-    fontSize: "13px",
+    fontSize: "14px",
     color: "#64748b",
+    marginBottom: "6px",
+    lineHeight: 1.5,
   },
 
   appointmentSub: {
     fontSize: "13px",
     color: "#94a3b8",
+    lineHeight: 1.5,
   },
 
   appointmentRight: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "flex-end",
-    gap: "8px",
+    textAlign: "right",
     flexShrink: 0,
   },
 
   appointmentId: {
     fontSize: "12px",
-    color: "#64748b",
-    fontWeight: "700",
+    color: "#94a3b8",
+    marginBottom: "8px",
+    fontWeight: 700,
   },
 
   appointmentArrow: {
-    width: "30px",
-    height: "30px",
-    borderRadius: "999px",
-    background: "#f1f5f9",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "#0f172a",
-    fontWeight: "800",
+    fontSize: "20px",
+    color: "#64748b",
   },
 
-  sideCard: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "22px",
-    padding: "22px",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.05)",
-    display: "grid",
-    gap: "14px",
-  },
-
-  sideCardDark: {
-    background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
-    borderRadius: "22px",
-    padding: "22px",
-    color: "#fff",
-    boxShadow: "0 18px 40px rgba(15, 23, 42, 0.18)",
-  },
-
-  sideTitle: {
-    margin: 0,
-    fontSize: "22px",
-    fontWeight: "800",
-    color: "#0f172a",
-    letterSpacing: "-0.03em",
-  },
-
-  sideMetricCard: {
-    border: "1px solid #e5e7eb",
-    borderRadius: "18px",
+  empty: {
     padding: "16px",
-    background: "#fff",
-  },
-
-  sideMetricLabel: {
-    fontSize: "14px",
+    textAlign: "center",
+    borderRadius: "14px",
+    background: "#f8fafc",
     color: "#64748b",
-    fontWeight: "600",
-  },
-
-  sideMetricValue: {
-    marginTop: "10px",
-    fontSize: "30px",
-    fontWeight: "800",
-    color: "#0f172a",
-    letterSpacing: "-0.03em",
-  },
-
-  sideMetricSub: {
-    marginTop: "5px",
-    fontSize: "12px",
-    color: "#94a3b8",
-  },
-
-  sideDarkLabel: {
-    fontSize: "14px",
-    color: "rgba(255,255,255,0.72)",
-    fontWeight: "600",
-  },
-
-  sideDarkValue: {
-    marginTop: "8px",
-    fontSize: "42px",
-    fontWeight: "800",
-    letterSpacing: "-0.04em",
-  },
-
-  sideDarkText: {
-    marginTop: "10px",
-    fontSize: "14px",
-    lineHeight: 1.7,
-    color: "rgba(255,255,255,0.78)",
-  },
-
-  insightItem: {
-    padding: "14px 0",
-    borderBottom: "1px solid #eef2f7",
-  },
-
-  insightHeading: {
-    fontSize: "13px",
-    fontWeight: "700",
-    color: "#0f172a",
-    marginBottom: "6px",
-  },
-
-  insightText: {
-    fontSize: "14px",
-    color: "#64748b",
-    lineHeight: 1.6,
+    border: "1px dashed #cbd5e1",
   },
 
   list: {
-    display: "grid",
+    display: "flex",
+    flexDirection: "column",
     gap: "12px",
   },
 
   jobCard: {
-    background: "#fff",
-    borderRadius: "16px",
-    padding: "16px",
-    border: "1px solid #e5e7eb",
     display: "flex",
     justifyContent: "space-between",
+    gap: "14px",
     alignItems: "center",
+    border: "1px solid #e5e7eb",
+    borderRadius: "16px",
+    padding: "14px 16px",
     cursor: "pointer",
-    transition: "all 0.2s ease",
-    gap: "12px",
+    background: "#ffffff",
   },
 
   jobMain: {
@@ -1113,38 +1172,112 @@ const styles = {
   },
 
   jobCustomer: {
-    fontSize: "16px",
+    fontSize: "15px",
     color: "#0f172a",
-  },
-
-  jobRight: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    textAlign: "right",
-    alignItems: "flex-end",
-    flexShrink: 0,
   },
 
   jobMeta: {
     fontSize: "13px",
     color: "#64748b",
+    lineHeight: 1.5,
   },
 
-  empty: {
-    background: "#fff",
-    padding: "16px",
-    borderRadius: "14px",
+  jobRight: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "flex-end",
+    gap: "8px",
+    flexShrink: 0,
+  },
+
+  sideCard: {
+    background: "#ffffff",
     border: "1px solid #e5e7eb",
-    color: "#6b7280",
+    borderRadius: "24px",
+    padding: "20px",
   },
 
-  emptyLarge: {
-    background: "#f8fafc",
-    padding: "24px",
+  sideTitle: {
+    margin: 0,
+    marginBottom: "16px",
+    fontSize: "18px",
+    fontWeight: 800,
+    color: "#0f172a",
+  },
+
+  sideMetricCard: {
+    border: "1px solid #e5e7eb",
     borderRadius: "18px",
-    border: "1px dashed #cbd5e1",
-    color: "#64748b",
+    padding: "16px",
+    background: "#ffffff",
+    marginBottom: "12px",
+  },
+
+  sideMetricLabel: {
     fontSize: "14px",
+    color: "#64748b",
+    marginBottom: "10px",
+    fontWeight: 700,
+  },
+
+  sideMetricValue: {
+    fontSize: "24px",
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: "6px",
+  },
+
+  sideMetricSub: {
+    fontSize: "13px",
+    color: "#94a3b8",
+    lineHeight: 1.5,
+  },
+
+  sideCardDark: {
+    borderRadius: "24px",
+    padding: "22px",
+    background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
+    color: "#ffffff",
+  },
+
+  sideDarkLabel: {
+    fontSize: "13px",
+    fontWeight: 700,
+    color: "rgba(255,255,255,0.72)",
+    textTransform: "uppercase",
+    letterSpacing: "0.08em",
+    marginBottom: "12px",
+  },
+
+  sideDarkValue: {
+    fontSize: "36px",
+    fontWeight: 800,
+    marginBottom: "10px",
+  },
+
+  sideDarkText: {
+    fontSize: "14px",
+    color: "rgba(255,255,255,0.82)",
+    lineHeight: 1.7,
+  },
+
+  insightItem: {
+    padding: "14px 0",
+    borderTop: "1px solid #eef2f7",
+  },
+
+  insightHeading: {
+    fontSize: "13px",
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: "6px",
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+  },
+
+  insightText: {
+    fontSize: "14px",
+    color: "#64748b",
+    lineHeight: 1.7,
   },
 };
