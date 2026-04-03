@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
-import { API_BASE_URL } from "../config";
 import {
   getDateKeyInTimeZone,
   formatDateForDisplay,
@@ -15,105 +13,18 @@ import {
 } from "../utils/time";
 import { useCompany } from "../context/CompanyContext";
 
-const API = API_BASE_URL;
-
-const DASHBOARD_JOBS_CACHE_TTL_MS = 30 * 1000;
-
-const dashboardJobsCache = {
-  token: null,
-  data: null,
-  loadedAt: 0,
-  promise: null,
-};
-
-function isDashboardJobsCacheValid(token) {
-  return (
-    dashboardJobsCache.token === token &&
-    Array.isArray(dashboardJobsCache.data) &&
-    Date.now() - dashboardJobsCache.loadedAt < DASHBOARD_JOBS_CACHE_TTL_MS
-  );
-}
-
-async function loadDashboardJobs(token) {
-  if (!token) return [];
-
-  if (isDashboardJobsCacheValid(token)) {
-    return dashboardJobsCache.data;
-  }
-
-  if (dashboardJobsCache.promise && dashboardJobsCache.token === token) {
-    return dashboardJobsCache.promise;
-  }
-
-  dashboardJobsCache.token = token;
-  dashboardJobsCache.promise = axios
-    .get(`${API}/jobs`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    .then((res) => {
-      const nextJobs = res?.data?.jobs || [];
-      dashboardJobsCache.data = nextJobs;
-      dashboardJobsCache.loadedAt = Date.now();
-      return nextJobs;
-    })
-    .finally(() => {
-      dashboardJobsCache.promise = null;
-    });
-
-  return dashboardJobsCache.promise;
-}
-
 
 export default function DashboardPage() {
-  const token = localStorage.getItem("token");
   const navigate = useNavigate();
 
-  const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
-  const { timezone: companyTimezone, firstDayOfWeek: companyFirstDayOfWeek } = useCompany();
+  const {
+    jobs = [],
+    loading,
+    timezone: companyTimezone,
+    firstDayOfWeek: companyFirstDayOfWeek,
+  } = useCompany();
   const quickCreateRef = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function hydrateJobs() {
-      if (!token) {
-        setJobs([]);
-        setLoading(false);
-        return;
-      }
-
-      if (isDashboardJobsCacheValid(token)) {
-        setJobs(dashboardJobsCache.data || []);
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        const nextJobs = await loadDashboardJobs(token);
-        if (!cancelled) {
-          setJobs(nextJobs);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error("Failed to fetch jobs:", error);
-          setJobs([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    hydrateJobs();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [token]);
 
   useEffect(() => {
     function handleClickOutside(e) {
@@ -130,7 +41,7 @@ export default function DashboardPage() {
       document.removeEventListener("mousedown", handleClickOutside);
     };
   }, []);
-  }
+
 
   const today = useMemo(() => getTodayKeyInTimeZone(companyTimezone), [companyTimezone]);
 
@@ -206,7 +117,11 @@ export default function DashboardPage() {
     };
   }, [jobs, today, companyTimezone]);
 
-  const greeting = getGreeting(companyTimezone);
+  const greeting = getHourInTimeZone(companyTimezone) < 12
+    ? "Good morning"
+    : getHourInTimeZone(companyTimezone) < 18
+      ? "Good afternoon"
+      : "Good evening";
   const userName = getStoredUserName();
 
   return (
@@ -666,7 +581,7 @@ function MiniMetric({ label, value, note }) {
   );
 }
 
-function getGreeting(timeZone) {
+function getGreeting(timeZone = DEFAULT_COMPANY_TIMEZONE) {
   const hour = getHourInTimeZone(timeZone);
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
