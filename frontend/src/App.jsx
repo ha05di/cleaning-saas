@@ -5,11 +5,14 @@ import DashboardPage from "./pages/DashboardPage";
 import CustomersPage from "./pages/CustomersPage";
 import JobsPage from "./pages/JobsPage";
 import CleanersPage from "./pages/CleanersPage";
+import NewCleanerPage from "./pages/NewCleanerPage";
 import JobDetailPage from "./pages/JobDetailPage";
 import CustomerDetailPage from "./pages/CustomerDetailPage";
 import SchedulePage from "./pages/SchedulePage";
 import LandingPage from "./pages/LandingPage";
 import { useAuth } from "./context/AuthContext";
+import NewJobPage from "./pages/NewJobPage";
+import NewCustomerPage from "./pages/NewCustomerPage";
 
 function PrivateRoute({ children }) {
   const { session, loading } = useAuth();
@@ -36,6 +39,7 @@ export default function App() {
           </PrivateRoute>
         }
       />
+
       <Route
         path="/schedule"
         element={
@@ -44,6 +48,7 @@ export default function App() {
           </PrivateRoute>
         }
       />
+
       <Route
         path="/customers"
         element={
@@ -53,6 +58,23 @@ export default function App() {
         }
       />
       <Route
+        path="/customers/new"
+        element={
+          <PrivateRoute>
+            <NewCustomerPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/customers/:id"
+        element={
+          <PrivateRoute>
+            <CustomerDetailPage />
+          </PrivateRoute>
+        }
+      />
+
+      <Route
         path="/jobs"
         element={
           <PrivateRoute>
@@ -61,10 +83,10 @@ export default function App() {
         }
       />
       <Route
-        path="/cleaners"
+        path="/jobs/new"
         element={
           <PrivateRoute>
-            <CleanersPage />
+            <NewJobPage />
           </PrivateRoute>
         }
       />
@@ -76,11 +98,28 @@ export default function App() {
           </PrivateRoute>
         }
       />
+
       <Route
-        path="/customers/:id"
+        path="/cleaners"
         element={
           <PrivateRoute>
-            <CustomerDetailPage />
+            <CleanersPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleaners/new"
+        element={
+          <PrivateRoute>
+            <NewCleanerPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/cleaners/:id"
+        element={
+          <PrivateRoute>
+            <NewCleanerPage />
           </PrivateRoute>
         }
       />

@@ -10,49 +10,14 @@ export default function JobsPage() {
   const token = localStorage.getItem("token");
   const navigate = useNavigate();
 
-  const [customers, setCustomers] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-
   const [statusFilter, setStatusFilter] = useState("");
   const [dateFilter, setDateFilter] = useState("");
   const [search, setSearch] = useState("");
 
-  const [showQuickCustomer, setShowQuickCustomer] = useState(false);
-  const [quickCustomerLoading, setQuickCustomerLoading] = useState(false);
-
-  const [quickCustomerForm, setQuickCustomerForm] = useState({
-    name: "",
-    phone: "",
-    address: "",
-  });
-
-  const [form, setForm] = useState({
-    customerId: "",
-    serviceDate: "",
-    serviceTime: "",
-    serviceType: "",
-  });
-
-  useEffect(() => {
-    fetchCustomers();
-  }, []);
-
   useEffect(() => {
     fetchJobs();
   }, [statusFilter, dateFilter]);
-
-  async function fetchCustomers() {
-    try {
-      const res = await axios.get(`${API}/customers`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setCustomers(res.data.customers || []);
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to fetch customers");
-    }
-  }
 
   async function fetchJobs() {
     try {
@@ -69,137 +34,6 @@ export default function JobsPage() {
     } catch (error) {
       alert(error?.response?.data?.error || "Failed to fetch jobs");
     }
-  }
-
-  function handleChange(e) {
-    setForm({
-      ...form,
-      [e.target.name]: e.target.value,
-    });
-  }
-
-  function handleQuickCustomerChange(e) {
-    setQuickCustomerForm({
-      ...quickCustomerForm,
-      [e.target.name]: e.target.value,
-    });
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-
-    if (!form.customerId || !form.serviceDate) {
-      alert("Please select customer and date");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      if (editingId) {
-        await axios.put(
-          `${API}/jobs/${editingId}`,
-          {
-            customerId: Number(form.customerId),
-            serviceDate: form.serviceDate,
-            serviceTime: form.serviceTime,
-            serviceType: form.serviceType,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-      } else {
-        await axios.post(
-          `${API}/jobs`,
-          {
-            customerId: Number(form.customerId),
-            serviceDate: form.serviceDate,
-            serviceTime: form.serviceTime,
-            serviceType: form.serviceType,
-          },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
-        );
-      }
-
-      resetForm();
-      await fetchJobs();
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to save job");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleQuickCreateCustomer(e) {
-    e.preventDefault();
-
-    if (!quickCustomerForm.name.trim()) {
-      alert("Customer name is required");
-      return;
-    }
-
-    setQuickCustomerLoading(true);
-
-    try {
-      const res = await axios.post(
-        `${API}/customers`,
-        {
-          name: quickCustomerForm.name,
-          phone: quickCustomerForm.phone,
-          address: quickCustomerForm.address,
-        },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      const newCustomer = res.data.customer;
-
-      await fetchCustomers();
-
-      setForm((prev) => ({
-        ...prev,
-        customerId: String(newCustomer.id),
-      }));
-
-      setQuickCustomerForm({
-        name: "",
-        phone: "",
-        address: "",
-      });
-
-      setShowQuickCustomer(false);
-      alert("New customer created and selected");
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to create customer");
-    } finally {
-      setQuickCustomerLoading(false);
-    }
-  }
-
-  function handleEdit(job) {
-    setEditingId(job.id);
-    setForm({
-      customerId: job.customerId ? String(job.customerId) : "",
-      serviceDate: formatDate(job.serviceDate),
-      serviceTime: job.serviceTime || "",
-      serviceType: job.serviceType || "",
-    });
-
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-
-  function resetForm() {
-    setEditingId(null);
-    setForm({
-      customerId: "",
-      serviceDate: "",
-      serviceTime: "",
-      serviceType: "",
-    });
   }
 
   function clearFilters() {
@@ -219,6 +53,8 @@ export default function JobsPage() {
       const status = (job.status || "").toLowerCase();
       const serviceTime = (job.serviceTime || "").toLowerCase();
       const orderNo = (job.orderNo || "").toLowerCase();
+      const source = (job.source || "").toLowerCase();
+      const address = (job.customer?.address || "").toLowerCase();
 
       return (
         customerName.includes(q) ||
@@ -226,123 +62,47 @@ export default function JobsPage() {
         serviceType.includes(q) ||
         status.includes(q) ||
         serviceTime.includes(q) ||
-        orderNo.includes(q)
+        orderNo.includes(q) ||
+        source.includes(q) ||
+        address.includes(q)
       );
     });
   }, [jobs, search]);
 
+  const stats = {
+    total: jobs.length,
+    pending: jobs.filter((j) => j.status === "pending").length,
+    assigned: jobs.filter((j) => j.status === "assigned").length,
+    completed: jobs.filter((j) => j.status === "completed").length,
+  };
+
   return (
     <AppLayout title="Jobs">
       <div style={styles.page}>
-        <form onSubmit={handleSubmit} style={styles.formCard}>
-          <div style={styles.customerSelectWrap}>
-            <select
-              name="customerId"
-              value={form.customerId}
-              onChange={handleChange}
-              style={styles.input}
-            >
-              <option value="">Select Customer</option>
-              {customers.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-
-            <button
-              type="button"
-              style={styles.addInlineBtn}
-              onClick={() => setShowQuickCustomer((prev) => !prev)}
-            >
-              {showQuickCustomer ? "Close New Customer" : "+ New Customer"}
-            </button>
+        <div style={styles.header}>
+          <div>
+            <h1 style={styles.title}>Jobs</h1>
+            <div style={styles.subtitle}>
+              Manage bookings, assignments, and job progress.
+            </div>
           </div>
 
-          <input
-            type="date"
-            name="serviceDate"
-            value={form.serviceDate}
-            onChange={handleChange}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Time"
-            name="serviceTime"
-            value={form.serviceTime}
-            onChange={handleChange}
-            style={styles.input}
-          />
-
-          <input
-            placeholder="Service Type"
-            name="serviceType"
-            value={form.serviceType}
-            onChange={handleChange}
-            style={styles.input}
-          />
-
-          <button type="submit" style={styles.primaryBtn} disabled={loading}>
-            {loading
-              ? editingId
-                ? "Updating..."
-                : "Creating..."
-              : editingId
-              ? "Update Job"
-              : "Create"}
+          <button
+            style={styles.newJobBtn}
+            onClick={() => navigate("/jobs/new")}
+          >
+            + New Job
           </button>
+        </div>
 
-          {editingId && (
-            <button
-              type="button"
-              style={styles.secondaryBtn}
-              onClick={resetForm}
-            >
-              Cancel Edit
-            </button>
-          )}
-        </form>
+        <div style={styles.kpiGrid}>
+          <KpiCard label="Total Jobs" value={stats.total} />
+          <KpiCard label="Pending" value={stats.pending} />
+          <KpiCard label="Assigned" value={stats.assigned} />
+          <KpiCard label="Completed" value={stats.completed} />
+        </div>
 
-        {showQuickCustomer && (
-          <form onSubmit={handleQuickCreateCustomer} style={styles.quickCustomerCard}>
-            <div style={styles.quickCustomerTitle}>Quick New Customer</div>
-
-            <input
-              style={styles.input}
-              name="name"
-              placeholder="Customer Name"
-              value={quickCustomerForm.name}
-              onChange={handleQuickCustomerChange}
-            />
-
-            <input
-              style={styles.input}
-              name="phone"
-              placeholder="Phone"
-              value={quickCustomerForm.phone}
-              onChange={handleQuickCustomerChange}
-            />
-
-            <input
-              style={styles.input}
-              name="address"
-              placeholder="Address"
-              value={quickCustomerForm.address}
-              onChange={handleQuickCustomerChange}
-            />
-
-            <button
-              type="submit"
-              style={styles.primaryBtn}
-              disabled={quickCustomerLoading}
-            >
-              {quickCustomerLoading ? "Saving..." : "Save Customer"}
-            </button>
-          </form>
-        )}
-
-        <div style={styles.filterCard}>
+        <div style={styles.filterBar}>
           <select
             style={styles.input}
             value={statusFilter}
@@ -363,7 +123,7 @@ export default function JobsPage() {
 
           <input
             style={styles.input}
-            placeholder="Search order no, customer, cleaner, type, status, time"
+            placeholder="Search order no, customer, cleaner, address..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -373,90 +133,80 @@ export default function JobsPage() {
             style={styles.secondaryBtn}
             onClick={clearFilters}
           >
-            Clear Filters
+            Clear
           </button>
         </div>
 
-        <div style={styles.resultCount}>
-          {filteredJobs.length} result
-          {filteredJobs.length === 1 ? "" : "s"}
-        </div>
+        <div style={styles.tableWrap}>
+          <div style={styles.tableHeader}>
+            <div>Client</div>
+            <div>Job number</div>
+            <div>Property</div>
+            <div>Schedule</div>
+            <div>Status</div>
+            <div>Actions</div>
+          </div>
 
-        <div style={styles.list}>
           {filteredJobs.length === 0 ? (
-            <div style={styles.empty}>No jobs found</div>
+            <div style={styles.emptyRow}>
+              <div style={styles.emptyTitle}>No jobs found</div>
+              <div style={styles.emptySub}>
+                Try changing filters or create a new booking.
+              </div>
+            </div>
           ) : (
             filteredJobs.map((job) => (
-              <div key={job.id} style={styles.card}>
-                <div style={styles.headerTop}>
-                  <div
-                    style={{ ...styles.customerName, cursor: "pointer" }}
-                    onClick={() => navigate(`/jobs/${job.id}`)}
-                  >
+              <div
+                key={job.id}
+                style={styles.tableRow}
+                onClick={() => navigate(`/jobs/${job.id}`)}
+              >
+                <div style={styles.clientCell}>
+                  <div style={styles.clientName}>
                     {job.customer?.name || "Unknown Customer"}
                   </div>
-
-                  <div style={styles.orderNoBadge}>
-                    {job.orderNo || `JOB-${job.id}`}
+                  <div style={styles.clientSub}>
+                    {job.customer?.phone || "-"}
                   </div>
                 </div>
 
-                <div style={styles.meta}>
-                  Date: {formatDate(job.serviceDate)}
-                  {job.serviceTime ? ` · ${job.serviceTime}` : ""}
+                <div style={styles.jobNumberCell}>
+                  <div style={styles.jobNumberMain}>
+                    {job.orderNo || `JOB-${job.id}`}
+                  </div>
+                  <div style={styles.jobNumberSub}>
+                    {job.serviceType || "-"}
+                  </div>
                 </div>
 
-                <div style={styles.meta}>
-                  Service: {job.serviceType || "No service type"}
+                <div style={styles.propertyCell}>
+                  <div style={styles.propertyText}>
+                    {job.customer?.address || "-"}
+                  </div>
                 </div>
 
-                <div style={styles.meta}>
-                  Status:{" "}
-                  <span style={getStatusStyle(job.status)}>
-                    {job.status}
-                  </span>
+                <div style={styles.scheduleCell}>
+                  <div style={styles.scheduleMain}>
+                    {formatDate(job.serviceDate)}
+                  </div>
+                  <div style={styles.scheduleSub}>
+                    {job.serviceTime || "-"}
+                  </div>
                 </div>
 
-                <div style={styles.meta}>
-                  Cleaner: {job.cleaner?.name || "Not assigned"}
+                <div style={styles.statusCell}>
+                  <div style={getStatusBadge(job.status)}>{job.status}</div>
                 </div>
 
-                <div style={styles.meta}>
-                  Source: {job.source || "-"}
-                </div>
-
-                <div style={styles.actions}>
-                  <button
-                    type="button"
-                    style={styles.editBtn}
-                    onClick={() => handleEdit(job)}
-                  >
-                    Edit
-                  </button>
-
-                  {job.status !== "completed" && (
-                    <AssignCleaner job={job} onUpdated={fetchJobs} />
-                  )}
-
-                  {job.status === "assigned" && (
-                    <button
-                      type="button"
-                      style={styles.completeBtn}
-                      onClick={() => handleComplete(job.id, token, fetchJobs)}
-                    >
-                      Mark Completed
-                    </button>
-                  )}
-
-                  <button
-                    type="button"
-                    style={styles.deleteBtn}
-                    onClick={() =>
-                      handleDelete(job.id, editingId, resetForm, token, fetchJobs)
-                    }
-                  >
-                    Delete
-                  </button>
+                <div
+                  style={styles.actionsCell}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ActionMenu
+                    job={job}
+                    refresh={fetchJobs}
+                    onOpen={() => navigate(`/jobs/${job.id}`)}
+                  />
                 </div>
               </div>
             ))
@@ -467,302 +217,400 @@ export default function JobsPage() {
   );
 }
 
-function AssignCleaner({ job, onUpdated }) {
-  const token = localStorage.getItem("token");
-  const [cleaners, setCleaners] = useState([]);
-  const [selected, setSelected] = useState(
-    job.cleaner?.id ? String(job.cleaner.id) : ""
-  );
-  const [assigning, setAssigning] = useState(false);
-
-  useEffect(() => {
-    fetchCleaners();
-  }, []);
-
-  async function fetchCleaners() {
-    try {
-      const res = await axios.get(`${API}/cleaners`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setCleaners(res.data.cleaners || []);
-    } catch (error) {
-      console.error("Failed to fetch cleaners", error);
-    }
-  }
-
-  async function handleAssign() {
-    if (!selected) {
-      alert("Please select a cleaner");
-      return;
-    }
-
-    setAssigning(true);
-
-    try {
-      await axios.put(
-        `${API}/jobs/${job.id}/assign`,
-        { cleanerId: Number(selected) },
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      await onUpdated();
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to assign cleaner");
-    } finally {
-      setAssigning(false);
-    }
-  }
-
+function KpiCard({ label, value }) {
   return (
-    <div style={styles.assignWrap}>
-      <select
-        value={selected}
-        onChange={(e) => setSelected(e.target.value)}
-        style={styles.input}
-      >
-        <option value="">Assign Cleaner</option>
-        {cleaners.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
-
-      <button
-        type="button"
-        style={styles.assignBtn}
-        onClick={handleAssign}
-        disabled={assigning}
-      >
-        {assigning ? "Assigning..." : "Assign"}
-      </button>
+    <div style={styles.kpiCard}>
+      <div style={styles.kpiLabel}>{label}</div>
+      <div style={styles.kpiValue}>{value}</div>
     </div>
   );
 }
 
-async function handleComplete(jobId, token, refreshFn) {
-  try {
-    await axios.put(
-      `${API}/jobs/${jobId}/status`,
-      { status: "completed" },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+function ActionMenu({ job, refresh, onOpen }) {
+  const token = localStorage.getItem("token");
+  const [open, setOpen] = useState(false);
 
-    await refreshFn();
-  } catch (error) {
-    alert(error?.response?.data?.error || "Failed to mark completed");
-  }
-}
-
-async function handleDelete(jobId, editingId, resetForm, token, refreshFn) {
-  const confirmed = window.confirm("Are you sure you want to delete this job?");
-  if (!confirmed) return;
-
-  try {
-    await axios.delete(`${API}/jobs/${jobId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-
-    if (editingId === jobId) {
-      resetForm();
+  async function updateStatus(status) {
+    try {
+      await axios.put(
+        `${API}/jobs/${job.id}/status`,
+        { status },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      refresh();
+      setOpen(false);
+    } catch (error) {
+      alert(error?.response?.data?.error || "Failed to update status");
     }
-
-    await refreshFn();
-  } catch (error) {
-    alert(error?.response?.data?.error || "Failed to delete job");
   }
+
+  async function remove() {
+    const confirmed = window.confirm("Are you sure you want to delete this job?");
+    if (!confirmed) return;
+
+    try {
+      await axios.delete(`${API}/jobs/${job.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      refresh();
+      setOpen(false);
+    } catch (error) {
+      alert(error?.response?.data?.error || "Failed to delete job");
+    }
+  }
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        style={styles.menuBtn}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        •••
+      </button>
+
+      {open && (
+        <div style={styles.menu}>
+          <button style={styles.menuItem} onClick={onOpen}>
+            Open
+          </button>
+
+          {job.status !== "assigned" && (
+            <button
+              style={styles.menuItem}
+              onClick={() => updateStatus("assigned")}
+            >
+              Mark Assigned
+            </button>
+          )}
+
+          {job.status !== "completed" && (
+            <button
+              style={styles.menuItem}
+              onClick={() => updateStatus("completed")}
+            >
+              Mark Completed
+            </button>
+          )}
+
+          <button
+            style={{ ...styles.menuItem, ...styles.menuDanger }}
+            onClick={remove}
+          >
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
 
-function formatDate(dateString) {
-  if (!dateString) return "";
-  return dateString.split("T")[0];
+function formatDate(d) {
+  if (!d) return "";
+  return d.split("T")[0];
 }
 
-function getStatusStyle(status) {
-  if (status === "completed") return { color: "#15803d", fontWeight: 700 };
-  if (status === "assigned") return { color: "#2563eb", fontWeight: 700 };
-  return { color: "#6b7280", fontWeight: 700 };
+function getStatusBadge(status) {
+  if (status === "completed") return styles.greenBadge;
+  if (status === "assigned") return styles.blueBadge;
+  return styles.grayBadge;
 }
 
 const styles = {
   page: {
     display: "grid",
-    gap: "20px",
+    gap: 16,
   },
-  formCard: {
+
+  header: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+
+  title: {
+    margin: 0,
+    fontSize: 32,
+    lineHeight: 1.05,
+    fontWeight: 850,
+    color: "#0f172a",
+    letterSpacing: "-0.03em",
+  },
+
+  subtitle: {
+    marginTop: 6,
+    color: "#6b7280",
+    fontSize: 14,
+  },
+
+  newJobBtn: {
+    padding: "12px 16px",
+    border: "none",
+    borderRadius: 12,
+    background: "#0f172a",
+    color: "#fff",
+    cursor: "pointer",
+    fontWeight: 800,
+    fontSize: 14,
+  },
+
+  kpiGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 12,
+  },
+
+  kpiCard: {
     background: "#fff",
     border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "16px",
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "12px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+    borderRadius: 18,
+    padding: 18,
+    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
   },
-  quickCustomerCard: {
-    background: "#fff",
-    border: "1px solid #dbeafe",
-    borderRadius: "16px",
-    padding: "16px",
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "12px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+
+  kpiLabel: {
+    fontSize: 13,
+    color: "#6b7280",
+    marginBottom: 8,
+    fontWeight: 700,
   },
-  quickCustomerTitle: {
-    gridColumn: "1 / -1",
-    fontSize: "18px",
-    fontWeight: "700",
-    color: "#2563eb",
+
+  kpiValue: {
+    fontSize: 28,
+    fontWeight: 850,
+    color: "#111827",
   },
-  customerSelectWrap: {
-    display: "grid",
-    gridTemplateColumns: "1fr auto",
-    gap: "10px",
-    alignItems: "center",
-  },
-  filterCard: {
+
+  filterBar: {
     background: "#fff",
     border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "16px",
+    borderRadius: 16,
+    padding: 12,
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "12px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+    gridTemplateColumns: "1fr 1fr 1.6fr auto",
+    gap: 10,
+    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
   },
+
   input: {
     padding: "12px 14px",
-    borderRadius: "12px",
+    borderRadius: 12,
     border: "1px solid #d1d5db",
     background: "#fff",
     minWidth: 0,
+    fontSize: 14,
+    outline: "none",
   },
-  primaryBtn: {
-    padding: "12px 14px",
-    border: "none",
-    borderRadius: "12px",
-    background: "#111827",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: "600",
-  },
-  addInlineBtn: {
-    padding: "12px 14px",
-    border: "none",
-    borderRadius: "12px",
-    background: "#2563eb",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: "600",
-    whiteSpace: "nowrap",
-  },
+
   secondaryBtn: {
     padding: "12px 14px",
     border: "1px solid #d1d5db",
-    borderRadius: "12px",
+    borderRadius: 12,
     background: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: 700,
+    fontSize: 14,
   },
-  resultCount: {
-    color: "#6b7280",
-    fontSize: "14px",
+
+  tableWrap: {
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 18,
+    overflow: "hidden",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
   },
-  list: {
+
+  tableHeader: {
     display: "grid",
-    gap: "14px",
+    gridTemplateColumns: "1.4fr 1.1fr 1.4fr 1fr 0.9fr 90px",
+    gap: 18,
+    padding: "16px 18px",
+    borderBottom: "1px solid #e5e7eb",
+    background: "#f8fafc",
+    fontSize: 12,
+    fontWeight: 800,
+    color: "#64748b",
+    textTransform: "uppercase",
+    letterSpacing: "0.05em",
   },
-  empty: {
-    background: "#fff",
-    borderRadius: "16px",
-    padding: "20px",
-    border: "1px solid #e5e7eb",
+
+  tableRow: {
+    display: "grid",
+    gridTemplateColumns: "1.4fr 1.1fr 1.4fr 1fr 0.9fr 90px",
+    gap: 18,
+    padding: "18px 18px",
+    borderBottom: "1px solid #f1f5f9",
+    alignItems: "center",
+    cursor: "pointer",
   },
-  card: {
-    background: "#fff",
-    borderRadius: "16px",
-    padding: "18px",
-    border: "1px solid #e5e7eb",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+
+  clientCell: {
+    minWidth: 0,
   },
-  headerTop: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: "12px",
-    flexWrap: "wrap",
-    marginBottom: "8px",
+
+  clientName: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#0f172a",
+    marginBottom: 4,
   },
-  customerName: {
-    fontSize: "22px",
-    fontWeight: "700",
-    marginBottom: "8px",
+
+  clientSub: {
+    fontSize: 13,
+    color: "#6b7280",
   },
-  orderNoBadge: {
-    background: "#eff6ff",
+
+  jobNumberCell: {
+    minWidth: 0,
+  },
+
+  jobNumberMain: {
+    fontSize: 15,
+    fontWeight: 800,
     color: "#1d4ed8",
-    border: "1px solid #bfdbfe",
-    borderRadius: "999px",
-    padding: "6px 12px",
-    fontSize: "13px",
-    fontWeight: "700",
-    whiteSpace: "nowrap",
+    marginBottom: 4,
   },
-  meta: {
-    color: "#4b5563",
-    marginBottom: "6px",
+
+  jobNumberSub: {
+    fontSize: 13,
+    color: "#6b7280",
   },
-  actions: {
-    marginTop: "14px",
+
+  propertyCell: {
+    minWidth: 0,
+  },
+
+  propertyText: {
+    fontSize: 14,
+    fontWeight: 600,
+    color: "#111827",
+    lineHeight: 1.45,
+    wordBreak: "break-word",
+  },
+
+  scheduleCell: {
+    minWidth: 0,
+  },
+
+  scheduleMain: {
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#111827",
+    marginBottom: 4,
+  },
+
+  scheduleSub: {
+    fontSize: 13,
+    color: "#6b7280",
+  },
+
+  statusCell: {
     display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
     alignItems: "center",
   },
-  assignWrap: {
+
+  actionsCell: {
     display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
+    justifyContent: "flex-end",
+    alignItems: "center",
   },
-  assignBtn: {
-    padding: "12px 14px",
-    border: "none",
-    borderRadius: "12px",
-    background: "#2563eb",
-    color: "#fff",
+
+  menuBtn: {
+    width: 40,
+    height: 40,
+    border: "1px solid #e5e7eb",
+    borderRadius: 12,
+    background: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: 900,
+    fontSize: 16,
+    color: "#111827",
   },
-  completeBtn: {
-    padding: "12px 14px",
-    border: "none",
-    borderRadius: "12px",
-    background: "#16a34a",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: "600",
+
+  menu: {
+    position: "absolute",
+    right: 0,
+    top: 46,
+    minWidth: 180,
+    background: "#fff",
+    border: "1px solid #e5e7eb",
+    borderRadius: 14,
+    padding: 8,
+    display: "grid",
+    gap: 4,
+    boxShadow: "0 14px 30px rgba(15,23,42,0.12)",
+    zIndex: 20,
   },
-  editBtn: {
-    padding: "12px 14px",
+
+  menuItem: {
+    textAlign: "left",
     border: "none",
-    borderRadius: "12px",
-    background: "#111827",
-    color: "#fff",
+    background: "transparent",
+    padding: "10px 12px",
+    borderRadius: 10,
+    fontSize: 14,
+    fontWeight: 700,
+    color: "#111827",
     cursor: "pointer",
-    fontWeight: "600",
   },
-  deleteBtn: {
-    padding: "12px 14px",
-    border: "none",
-    borderRadius: "12px",
-    background: "#dc2626",
-    color: "#fff",
-    cursor: "pointer",
-    fontWeight: "600",
+
+  menuDanger: {
+    color: "#dc2626",
+  },
+
+  greenBadge: {
+    background: "#dcfce7",
+    color: "#15803d",
+    border: "1px solid #bbf7d0",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "capitalize",
+    whiteSpace: "nowrap",
+    width: "fit-content",
+  },
+
+  blueBadge: {
+    background: "#dbeafe",
+    color: "#2563eb",
+    border: "1px solid #bfdbfe",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "capitalize",
+    whiteSpace: "nowrap",
+    width: "fit-content",
+  },
+
+  grayBadge: {
+    background: "#f3f4f6",
+    color: "#6b7280",
+    border: "1px solid #e5e7eb",
+    borderRadius: 999,
+    padding: "6px 12px",
+    fontSize: 12,
+    fontWeight: 800,
+    textTransform: "capitalize",
+    whiteSpace: "nowrap",
+    width: "fit-content",
+  },
+
+  emptyRow: {
+    padding: "28px 18px",
+  },
+
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: 800,
+    color: "#111827",
+  },
+
+  emptySub: {
+    marginTop: 6,
+    fontSize: 14,
+    color: "#6b7280",
   },
 };

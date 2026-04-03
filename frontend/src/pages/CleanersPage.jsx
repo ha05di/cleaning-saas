@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 import AppLayout from "../components/AppLayout";
 import { API_BASE_URL } from "../config";
 
@@ -7,24 +8,26 @@ const API = API_BASE_URL;
 
 export default function CleanersPage() {
   const token = localStorage.getItem("token");
+  const navigate = useNavigate();
 
   const [cleaners, setCleaners] = useState([]);
   const [jobs, setJobs] = useState([]);
-  const [editingId, setEditingId] = useState(null);
   const [search, setSearch] = useState("");
-
-  const [form, setForm] = useState({
-    name: "",
-    phone: "",
-    status: "active",
-    team: "",
-    notes: "",
-  });
+  const [actionMenuId, setActionMenuId] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchCleaners();
-    fetchJobs();
+    loadData();
   }, []);
+
+  async function loadData() {
+    try {
+      setLoading(true);
+      await Promise.all([fetchCleaners(), fetchJobs()]);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   async function fetchCleaners() {
     try {
@@ -48,75 +51,73 @@ export default function CleanersPage() {
     }
   }
 
-  function handleChange(e) {
-    setForm({
-      ...form,
-      [e.target.name]: e.target.value,
+  function getInitial(name = "") {
+    return name.trim()?.charAt(0)?.toUpperCase() || "?";
+  }
+
+  function getAssignedJobs(cleanerId) {
+    return jobs.filter((job) => {
+      const assignedCleanerId =
+        job.cleanerId ?? job.cleaner_id ?? job.assignedCleanerId;
+      return String(assignedCleanerId) === String(cleanerId);
     });
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault();
-
-    if (!form.name.trim()) {
-      alert("Cleaner name is required");
-      return;
-    }
-
-    try {
-      if (editingId) {
-        await axios.put(`${API}/cleaners/${editingId}`, form, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      } else {
-        await axios.post(`${API}/cleaners`, form, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-      }
-
-      resetForm();
-      fetchCleaners();
-    } catch (error) {
-      alert(error?.response?.data?.error || "Failed to save cleaner");
-    }
+  function getActiveAssignedJobs(cleanerId) {
+    return getAssignedJobs(cleanerId).filter((job) =>
+      ["assigned", "scheduled", "in_progress"].includes(
+        String(job.status || "").toLowerCase()
+      )
+    );
   }
 
-  function handleEdit(cleaner) {
-    setEditingId(cleaner.id);
-    setForm({
-      name: cleaner.name || "",
-      phone: cleaner.phone || "",
-      status: cleaner.status || "active",
-      team: cleaner.team || "",
-      notes: cleaner.notes || "",
-    });
-  }
+  function getWorkload(cleanerId) {
+    const count = getActiveAssignedJobs(cleanerId).length;
 
-  function resetForm() {
-    setEditingId(null);
-    setForm({
-      name: "",
-      phone: "",
-      status: "active",
-      team: "",
-      notes: "",
-    });
-  }
-
-  function getCleanerWorkload(cleanerId) {
-    const assignedCount = jobs.filter(
-      (job) => job.cleanerId === cleanerId && job.status === "assigned"
-    ).length;
-
-    if (assignedCount === 0) {
-      return { label: "idle", color: "#6b7280", bg: "#f3f4f6" };
+    if (count === 0) {
+      return {
+        label: "Idle",
+        text: "#667085",
+        bg: "#F2F4F7",
+        border: "#EAECF0",
+      };
     }
 
-    if (assignedCount === 1) {
-      return { label: "busy", color: "#2563eb", bg: "#dbeafe" };
+    if (count <= 2) {
+      return {
+        label: "Busy",
+        text: "#175CD3",
+        bg: "#EFF8FF",
+        border: "#B2DDFF",
+      };
     }
 
-    return { label: "full", color: "#b91c1c", bg: "#fee2e2" };
+    return {
+      label: "Full",
+      text: "#B42318",
+      bg: "#FEF3F2",
+      border: "#FECDCA",
+    };
+  }
+
+  function getStatusStyle(status) {
+    const value = String(status || "inactive").toLowerCase();
+
+    if (value === "active") {
+      return {
+        label: "Active",
+        text: "#067647",
+        bg: "#ECFDF3",
+        border: "#ABEFC6",
+      };
+    }
+
+    return {
+      label: "Inactive",
+      text: "#B42318",
+      bg: "#FEF3F2",
+      border: "#FECDCA",
+    };
   }
 
   const filteredCleaners = useMemo(() => {
@@ -126,153 +127,216 @@ export default function CleanersPage() {
     return cleaners.filter((c) => {
       const name = (c.name || "").toLowerCase();
       const phone = (c.phone || "").toLowerCase();
+      const email = (c.email || "").toLowerCase();
+      const team = (c.team || "").toLowerCase();
       const notes = (c.notes || "").toLowerCase();
       const status = (c.status || "").toLowerCase();
-      const team = (c.team || "").toLowerCase();
-      const workload = getCleanerWorkload(c.id).label.toLowerCase();
+      const workload = getWorkload(c.id).label.toLowerCase();
 
       return (
         name.includes(q) ||
         phone.includes(q) ||
+        email.includes(q) ||
+        team.includes(q) ||
         notes.includes(q) ||
         status.includes(q) ||
-        team.includes(q) ||
         workload.includes(q)
       );
     });
   }, [cleaners, search, jobs]);
 
+  const activeCount = cleaners.filter(
+    (c) => String(c.status || "").toLowerCase() === "active"
+  ).length;
+
+  const idleCount = cleaners.filter(
+    (c) => getWorkload(c.id).label === "Idle"
+  ).length;
+
+  const inactiveCount = cleaners.filter(
+    (c) => String(c.status || "").toLowerCase() !== "active"
+  ).length;
+
   return (
     <AppLayout title="Cleaners">
       <div style={styles.page}>
-        <form onSubmit={handleSubmit} style={styles.formCard}>
-          <input
-            style={styles.input}
-            name="name"
-            placeholder="Cleaner Name"
-            value={form.name}
-            onChange={handleChange}
-          />
+        <div style={styles.topBar}>
+          <div>
+            <h1 style={styles.pageTitle}>Manage team</h1>
+            <p style={styles.pageSubtitle}>
+              Add or manage team members that handle jobs in the field. Dispatch
+              them to job sites and keep cleaner records organized in one place.
+            </p>
+          </div>
 
-          <input
-            style={styles.input}
-            name="phone"
-            placeholder="Phone"
-            value={form.phone}
-            onChange={handleChange}
-          />
-
-          <select
-            style={styles.input}
-            name="status"
-            value={form.status}
-            onChange={handleChange}
+          <button
+            style={styles.primaryBtn}
+            onClick={() => navigate("/cleaners/new")}
           >
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
-
-          <input
-            style={styles.input}
-            name="team"
-            placeholder="Team (optional)"
-            value={form.team}
-            onChange={handleChange}
-          />
-
-          <input
-            style={styles.input}
-            name="notes"
-            placeholder="Notes"
-            value={form.notes}
-            onChange={handleChange}
-          />
-
-          <button type="submit" style={styles.primaryBtn}>
-            {editingId ? "Update Cleaner" : "Add Cleaner"}
+            Add Cleaner
           </button>
-
-          {editingId && (
-            <button
-              type="button"
-              style={styles.secondaryBtn}
-              onClick={resetForm}
-            >
-              Cancel Edit
-            </button>
-          )}
-        </form>
-
-        <div style={styles.searchCard}>
-          <input
-            style={styles.input}
-            placeholder="Search by name, phone, status, team, notes, workload"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
         </div>
 
-        <div style={styles.resultCount}>
-          {filteredCleaners.length} result
-          {filteredCleaners.length === 1 ? "" : "s"}
+        <div style={styles.toolbar}>
+          <div style={styles.searchWrap}>
+            <span style={styles.searchIcon}>⌕</span>
+            <input
+              style={styles.searchInput}
+              placeholder="Search by name, email, phone, team, status or workload"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
         </div>
 
-        <div style={styles.grid}>
-          {filteredCleaners.map((cleaner) => {
-            const workload = getCleanerWorkload(cleaner.id);
+        <div style={styles.contentGrid}>
+          <div style={styles.tableCard}>
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={{ ...styles.th, width: "34%" }}>NAME</th>
+                    <th style={{ ...styles.th, width: "22%" }}>EMAIL</th>
+                    <th style={{ ...styles.th, width: "14%" }}>PHONE</th>
+                    <th style={{ ...styles.th, width: "12%" }}>TEAM</th>
+                    <th style={{ ...styles.th, width: "10%" }}>STATUS</th>
+                    <th style={{ ...styles.th, width: "8%", textAlign: "right" }}>
+                      ACTIONS
+                    </th>
+                  </tr>
+                </thead>
 
-            return (
-              <div key={cleaner.id} style={styles.card}>
-                <div style={styles.name}>{cleaner.name}</div>
-                <div style={styles.meta}>Phone: {cleaner.phone || "-"}</div>
-                <div style={styles.meta}>Team: {cleaner.team || "-"}</div>
-                <div style={styles.meta}>
-                  Status:{" "}
-                  <span
-                    style={
-                      cleaner.status === "active"
-                        ? styles.activeStatus
-                        : styles.inactiveStatus
-                    }
-                  >
-                    {cleaner.status}
-                  </span>
-                </div>
+                <tbody>
+                  {loading ? (
+                    <tr>
+                      <td colSpan={6} style={styles.emptyTd}>
+                        Loading cleaners...
+                      </td>
+                    </tr>
+                  ) : filteredCleaners.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={styles.emptyTd}>
+                        No cleaners found
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCleaners.map((cleaner) => {
+                      const status = getStatusStyle(cleaner.status);
+                      const workload = getWorkload(cleaner.id);
+                      const activeJobs = getActiveAssignedJobs(cleaner.id).length;
 
-                <div style={styles.meta}>
-                  Workload:{" "}
-                  <span
-                    style={{
-                      background: workload.bg,
-                      color: workload.color,
-                      padding: "4px 10px",
-                      borderRadius: "999px",
-                      fontSize: "12px",
-                      fontWeight: "700",
-                      display: "inline-block",
-                    }}
-                  >
-                    {workload.label}
-                  </span>
-                </div>
+                      return (
+                        <tr key={cleaner.id}>
+                          <td style={styles.td}>
+                            <div style={styles.nameCell}>
+                              <div style={styles.avatar}>
+                                {getInitial(cleaner.name)}
+                              </div>
 
-                <div style={styles.meta}>Notes: {cleaner.notes || "-"}</div>
+                              <div>
+                                <div style={styles.nameText}>
+                                  {cleaner.name || "-"}
+                                </div>
+                                <div style={styles.subText}>
+                                  {workload.label} • {activeJobs} active job
+                                  {activeJobs === 1 ? "" : "s"}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
 
-                <div style={styles.actions}>
-                  <button
-                    style={styles.editBtn}
-                    onClick={() => handleEdit(cleaner)}
-                  >
-                    Edit
-                  </button>
-                </div>
+                          <td style={styles.td}>
+                            <div style={styles.cellText}>
+                              {cleaner.email || "-"}
+                            </div>
+                          </td>
+
+                          <td style={styles.td}>
+                            <div style={styles.cellText}>
+                              {cleaner.phone || "-"}
+                            </div>
+                          </td>
+
+                          <td style={styles.td}>
+                            <div style={styles.cellText}>
+                              {cleaner.team || "-"}
+                            </div>
+                          </td>
+
+                          <td style={styles.td}>
+                            <span
+                              style={{
+                                ...styles.badge,
+                                color: status.text,
+                                background: status.bg,
+                                borderColor: status.border,
+                              }}
+                            >
+                              {status.label}
+                            </span>
+                          </td>
+
+                          <td style={{ ...styles.td, textAlign: "right" }}>
+                            <div style={styles.actionWrap}>
+                              <button
+                                style={styles.dotsBtn}
+                                onClick={() =>
+                                  setActionMenuId((prev) =>
+                                    prev === cleaner.id ? null : cleaner.id
+                                  )
+                                }
+                              >
+                                •••
+                              </button>
+
+                              {actionMenuId === cleaner.id && (
+                                <div style={styles.menu}>
+                                  <button
+                                    style={styles.menuItem}
+                                    onClick={() =>
+                                      navigate(`/cleaners/${cleaner.id}`, {
+                                        state: { cleaner },
+                                      })
+                                    }
+                                  >
+                                    View / Edit
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div style={styles.sidePanel}>
+            <div style={styles.sideCard}>
+              <div style={styles.sideTitle}>ACTIVE CLEANERS</div>
+              <div style={styles.sidePill}>
+                {activeCount} of {cleaners.length}
               </div>
-            );
-          })}
+            </div>
 
-          {filteredCleaners.length === 0 && (
-            <div style={styles.empty}>No cleaners found</div>
-          )}
+            <div style={styles.miniCard}>
+              <div style={styles.miniLabel}>Idle cleaners</div>
+              <div style={styles.miniValue}>{idleCount}</div>
+            </div>
+
+            <div style={styles.miniCard}>
+              <div style={styles.miniLabel}>Inactive cleaners</div>
+              <div style={styles.miniValue}>{inactiveCount}</div>
+            </div>
+
+            <div style={styles.miniCard}>
+              <div style={styles.miniLabel}>Search results</div>
+              <div style={styles.miniValue}>{filteredCleaners.length}</div>
+            </div>
+          </div>
         </div>
       </div>
     </AppLayout>
@@ -282,96 +346,256 @@ export default function CleanersPage() {
 const styles = {
   page: {
     display: "grid",
+    gap: "24px",
+    paddingBottom: "24px",
+  },
+
+  topBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
     gap: "20px",
+    flexWrap: "wrap",
   },
-  formCard: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "16px",
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: "12px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+  pageTitle: {
+    margin: 0,
+    fontSize: "44px",
+    lineHeight: 1.05,
+    fontWeight: 800,
+    letterSpacing: "-0.03em",
+    color: "#0F172A",
   },
-  searchCard: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "16px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+  pageSubtitle: {
+    margin: "12px 0 0 0",
+    fontSize: "20px",
+    lineHeight: 1.55,
+    color: "#475467",
+    maxWidth: "900px",
   },
-  input: {
-    padding: "12px 14px",
-    borderRadius: "12px",
-    border: "1px solid #d1d5db",
-    background: "#fff",
-  },
+
   primaryBtn: {
-    padding: "12px 14px",
-    borderRadius: "12px",
     border: "none",
-    background: "#2563eb",
+    background: "#3B8218",
     color: "#fff",
-    cursor: "pointer",
-    fontWeight: "600",
-  },
-  secondaryBtn: {
-    padding: "12px 14px",
     borderRadius: "12px",
-    border: "1px solid #d1d5db",
-    background: "#fff",
+    padding: "14px 22px",
+    fontWeight: 700,
+    fontSize: "16px",
     cursor: "pointer",
-    fontWeight: "600",
+    boxShadow: "0 2px 6px rgba(16,24,40,0.08)",
   },
-  resultCount: {
-    color: "#6b7280",
+
+  toolbar: {
+    display: "flex",
+    justifyContent: "flex-start",
+  },
+  searchWrap: {
+    width: "100%",
+    maxWidth: "560px",
+    background: "#fff",
+    border: "1px solid #D0D5DD",
+    borderRadius: "14px",
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    padding: "0 14px",
+    height: "54px",
+  },
+  searchIcon: {
+    color: "#667085",
+    fontSize: "18px",
+  },
+  searchInput: {
+    width: "100%",
+    border: "none",
+    outline: "none",
+    background: "transparent",
+    fontSize: "15px",
+    color: "#101828",
+  },
+
+  contentGrid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1fr) 320px",
+    gap: "18px",
+    alignItems: "start",
+  },
+
+  tableCard: {
+    background: "#fff",
+    border: "1px solid #D0D5DD",
+    borderRadius: "18px",
+    overflow: "hidden",
+    boxShadow: "0 2px 8px rgba(16,24,40,0.04)",
+  },
+  tableWrap: {
+    overflowX: "auto",
+  },
+  table: {
+    width: "100%",
+    minWidth: "980px",
+    borderCollapse: "separate",
+    borderSpacing: 0,
+  },
+  th: {
+    textAlign: "left",
+    fontSize: "13px",
+    fontWeight: 800,
+    color: "#344054",
+    padding: "18px 20px",
+    borderBottom: "1px solid #D0D5DD",
+    background: "#FCFCFD",
+    letterSpacing: "0.02em",
+  },
+  td: {
+    padding: "18px 20px",
+    borderBottom: "1px solid #EAECF0",
+    verticalAlign: "middle",
+  },
+  emptyTd: {
+    padding: "40px 20px",
+    textAlign: "center",
+    color: "#667085",
+    fontSize: "15px",
+  },
+
+  nameCell: {
+    display: "flex",
+    alignItems: "center",
+    gap: "14px",
+  },
+  avatar: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "999px",
+    background: "#163B4D",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 800,
+    fontSize: "16px",
+    flexShrink: 0,
+  },
+  nameText: {
+    fontSize: "16px",
+    fontWeight: 700,
+    color: "#101828",
+    marginBottom: "4px",
+  },
+  subText: {
     fontSize: "14px",
+    color: "#667085",
   },
-  grid: {
+  cellText: {
+    fontSize: "15px",
+    color: "#101828",
+  },
+
+  badge: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "28px",
+    padding: "0 10px",
+    borderRadius: "999px",
+    fontSize: "12px",
+    fontWeight: 700,
+    border: "1px solid",
+    whiteSpace: "nowrap",
+  },
+
+  actionWrap: {
+    position: "relative",
+    display: "inline-block",
+  },
+  dotsBtn: {
+    border: "none",
+    background: "transparent",
+    cursor: "pointer",
+    fontSize: "20px",
+    fontWeight: 700,
+    color: "#344054",
+    padding: "4px 8px",
+    borderRadius: "10px",
+  },
+  menu: {
+    position: "absolute",
+    top: "calc(100% + 8px)",
+    right: 0,
+    minWidth: "150px",
+    background: "#fff",
+    border: "1px solid #EAECF0",
+    borderRadius: "12px",
+    boxShadow: "0 14px 30px rgba(16,24,40,0.12)",
+    overflow: "hidden",
+    zIndex: 20,
+  },
+  menuItem: {
+    width: "100%",
+    border: "none",
+    background: "#fff",
+    textAlign: "left",
+    padding: "12px 14px",
+    fontSize: "14px",
+    color: "#101828",
+    cursor: "pointer",
+  },
+
+  sidePanel: {
     display: "grid",
     gap: "14px",
   },
-  card: {
+  sideCard: {
     background: "#fff",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #D0D5DD",
     borderRadius: "16px",
     padding: "18px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+    boxShadow: "0 2px 8px rgba(16,24,40,0.04)",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
   },
-  name: {
-    fontSize: "20px",
-    fontWeight: "700",
+  sideTitle: {
+    fontSize: "18px",
+    fontWeight: 800,
+    color: "#163B4D",
+    letterSpacing: "0.02em",
+  },
+  sidePill: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "34px",
+    borderRadius: "999px",
+    padding: "0 12px",
+    background: "#FEF3F2",
+    color: "#B42318",
+    fontSize: "13px",
+    fontWeight: 700,
+    border: "1px solid #FECDCA",
+    whiteSpace: "nowrap",
+  },
+  miniCard: {
+    background: "#fff",
+    border: "1px solid #D0D5DD",
+    borderRadius: "16px",
+    padding: "18px",
+    boxShadow: "0 2px 8px rgba(16,24,40,0.04)",
+  },
+  miniLabel: {
+    fontSize: "13px",
+    color: "#667085",
     marginBottom: "8px",
+    textTransform: "uppercase",
+    letterSpacing: "0.03em",
+    fontWeight: 700,
   },
-  meta: {
-    color: "#6b7280",
-    marginBottom: "6px",
-  },
-  actions: {
-    marginTop: "12px",
-  },
-  editBtn: {
-    padding: "10px 14px",
-    borderRadius: "10px",
-    border: "none",
-    background: "#111827",
-    color: "#fff",
-    cursor: "pointer",
-  },
-  activeStatus: {
-    color: "#15803d",
-    fontWeight: "700",
-  },
-  inactiveStatus: {
-    color: "#b91c1c",
-    fontWeight: "700",
-  },
-  empty: {
-    background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "18px",
-    color: "#6b7280",
+  miniValue: {
+    fontSize: "30px",
+    fontWeight: 800,
+    color: "#101828",
+    lineHeight: 1,
   },
 };

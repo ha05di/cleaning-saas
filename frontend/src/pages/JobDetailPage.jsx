@@ -147,102 +147,117 @@ export default function JobDetailPage() {
   return (
     <AppLayout title={job.orderNo || `Job #${job.id}`}>
       <div style={styles.page}>
-        <div style={styles.topActions}>
-          <button style={styles.secondaryBtn} onClick={() => navigate("/jobs")}>
+        <div style={styles.topBar}>
+          <button style={styles.backBtn} onClick={() => navigate("/jobs")}>
             ← Back to Jobs
           </button>
-
-          <button style={styles.primaryBtn} onClick={() => navigate("/jobs")}>
-            Go to Jobs List
-          </button>
         </div>
 
-        <div style={styles.card}>
-          <div style={styles.headerRow}>
-            <div style={styles.headerLeft}>
-              <h2 style={styles.cardTitle}>Job Information</h2>
-              <div style={styles.orderNoBadge}>
-                {job.orderNo || `JOB-${job.id}`}
-              </div>
+        <div style={styles.heroCard}>
+          <div style={styles.heroLeft}>
+            <div style={styles.orderPill}>{job.orderNo || `JOB-${job.id}`}</div>
+            <div style={styles.customerName}>
+              {job.customer?.name || "Unknown Customer"}
             </div>
-            <span style={getStatusBadge(job.status)}>{job.status}</span>
+            <div style={styles.heroMeta}>
+              <span>{formatDate(job.serviceDate)}</span>
+              {job.serviceTime ? <span>· {job.serviceTime}</span> : null}
+              {job.serviceType ? <span>· {job.serviceType}</span> : null}
+            </div>
           </div>
 
-          <div style={styles.infoGrid}>
-            <InfoItem label="Order No" value={job.orderNo || `JOB-${job.id}`} />
-            <InfoItem label="Job ID" value={`#${job.id}`} />
-            <InfoItem label="Customer" value={job.customer?.name || "-"} />
-            <InfoItem label="Phone" value={job.customer?.phone || "-"} />
-            <InfoItem label="Address" value={job.customer?.address || "-"} />
-            <InfoItem label="Date" value={formatDate(job.serviceDate)} />
-            <InfoItem label="Time" value={job.serviceTime || "-"} />
-            <InfoItem label="Service Type" value={job.serviceType || "-"} />
-            <InfoItem label="Cleaner" value={job.cleaner?.name || "Not assigned"} />
-            <InfoItem label="Source" value={job.source || "-"} />
-            <InfoItem label="Created By" value={job.createdBy || "-"} />
-            <InfoItem label="External Ref" value={job.externalRef || "-"} />
+          <div style={styles.heroRight}>
+            <div style={getStatusBadge(job.status)}>{job.status}</div>
           </div>
         </div>
 
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>Assign Cleaner</h2>
+        <div style={styles.contentGrid}>
+          <div style={styles.detailCard}>
+            <div style={styles.cardHeader}>
+              <div style={styles.cardTitle}>Job Details</div>
+              <div style={styles.cardSub}>Core information for this order</div>
+            </div>
 
-          <div style={styles.assignRow}>
-            <select
-              style={styles.input}
-              value={selectedCleaner}
-              onChange={(e) => setSelectedCleaner(e.target.value)}
-            >
-              <option value="">Select Cleaner</option>
-              {cleaners.map((cleaner) => (
-                <option key={cleaner.id} value={cleaner.id}>
-                  {cleaner.name}
-                </option>
-              ))}
-            </select>
+            <div style={styles.detailList}>
+              <DetailRow label="Job ID" value={`#${job.id}`} />
+              <DetailRow label="Phone" value={job.customer?.phone || "-"} />
+              <DetailRow label="Address" value={job.customer?.address || "-"} />
+              <DetailRow label="Cleaner" value={job.cleaner?.name || "Not assigned"} />
+              <DetailRow label="Source" value={job.source || "-"} />
+              <DetailRow label="Created By" value={job.createdBy || "-"} />
+              <DetailRow label="External Ref" value={job.externalRef || "-"} />
+            </div>
+          </div>
 
-            <button
-              style={styles.primaryBtn}
-              onClick={handleAssignCleaner}
-              disabled={assigning}
-            >
-              {assigning ? "Assigning..." : "Assign Cleaner"}
-            </button>
+          <div style={styles.actionCard}>
+            <div style={styles.cardHeader}>
+              <div style={styles.cardTitle}>Actions</div>
+              <div style={styles.cardSub}>Manage assignment and status</div>
+            </div>
+
+            <div style={styles.actionBlock}>
+              <div style={styles.blockTitle}>Assign Cleaner</div>
+              <select
+                style={styles.input}
+                value={selectedCleaner}
+                onChange={(e) => setSelectedCleaner(e.target.value)}
+              >
+                <option value="">Select Cleaner</option>
+                {cleaners.map((cleaner) => (
+                  <option key={cleaner.id} value={cleaner.id}>
+                    {cleaner.name}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                style={styles.primaryBtn}
+                onClick={handleAssignCleaner}
+                disabled={assigning}
+              >
+                {assigning ? "Assigning..." : "Assign Cleaner"}
+              </button>
+            </div>
+
+            <div style={styles.softDivider} />
+
+            <div style={styles.actionBlock}>
+              <div style={styles.blockTitle}>Update Status</div>
+
+              <button
+                style={styles.grayBtn}
+                onClick={() => handleStatusChange("pending")}
+                disabled={updatingStatus}
+              >
+                Mark Pending
+              </button>
+
+              <button
+                style={styles.blueBtn}
+                onClick={() => handleStatusChange("assigned")}
+                disabled={updatingStatus}
+              >
+                Mark Assigned
+              </button>
+
+              <button
+                style={styles.greenBtn}
+                onClick={() => handleStatusChange("completed")}
+                disabled={updatingStatus}
+              >
+                Mark Completed
+              </button>
+            </div>
           </div>
         </div>
 
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>Update Status</h2>
-
-          <div style={styles.buttonRow}>
-            <button
-              style={styles.grayBtn}
-              onClick={() => handleStatusChange("pending")}
-              disabled={updatingStatus}
-            >
-              Mark Pending
-            </button>
-
-            <button
-              style={styles.blueBtn}
-              onClick={() => handleStatusChange("assigned")}
-              disabled={updatingStatus}
-            >
-              Mark Assigned
-            </button>
-
-            <button
-              style={styles.greenBtn}
-              onClick={() => handleStatusChange("completed")}
-              disabled={updatingStatus}
-            >
-              Mark Completed
-            </button>
+        <div style={styles.dangerInline}>
+          <div>
+            <div style={styles.dangerTitle}>Delete Job</div>
+            <div style={styles.dangerText}>
+              Permanently remove this job record.
+            </div>
           </div>
-        </div>
-
-        <div style={styles.card}>
-          <h2 style={styles.cardTitle}>Danger Zone</h2>
 
           <button
             style={styles.deleteBtn}
@@ -257,11 +272,11 @@ export default function JobDetailPage() {
   );
 }
 
-function InfoItem({ label, value }) {
+function DetailRow({ label, value }) {
   return (
-    <div style={styles.infoItem}>
-      <div style={styles.infoLabel}>{label}</div>
-      <div style={styles.infoValue}>{value}</div>
+    <div style={styles.detailRow}>
+      <div style={styles.detailLabel}>{label}</div>
+      <div style={styles.detailValue}>{value}</div>
     </div>
   );
 }
@@ -276,11 +291,12 @@ function getStatusBadge(status) {
     return {
       background: "#dcfce7",
       color: "#15803d",
-      padding: "4px 10px",
+      border: "1px solid #bbf7d0",
+      padding: "8px 14px",
       borderRadius: "999px",
-      fontSize: "12px",
-      fontWeight: "600",
-      display: "inline-block",
+      fontSize: "13px",
+      fontWeight: "700",
+      textTransform: "capitalize",
     };
   }
 
@@ -288,22 +304,24 @@ function getStatusBadge(status) {
     return {
       background: "#dbeafe",
       color: "#2563eb",
-      padding: "4px 10px",
+      border: "1px solid #bfdbfe",
+      padding: "8px 14px",
       borderRadius: "999px",
-      fontSize: "12px",
-      fontWeight: "600",
-      display: "inline-block",
+      fontSize: "13px",
+      fontWeight: "700",
+      textTransform: "capitalize",
     };
   }
 
   return {
     background: "#f3f4f6",
     color: "#6b7280",
-    padding: "4px 10px",
+    border: "1px solid #e5e7eb",
+    padding: "8px 14px",
     borderRadius: "999px",
-    fontSize: "12px",
-    fontWeight: "600",
-    display: "inline-block",
+    fontSize: "13px",
+    fontWeight: "700",
+    textTransform: "capitalize",
   };
 }
 
@@ -312,144 +330,228 @@ const styles = {
     display: "grid",
     gap: "20px",
   },
-  topActions: {
+  topBar: {
     display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
+    justifyContent: "flex-start",
   },
-  card: {
+  backBtn: {
+    padding: "12px 16px",
+    border: "1px solid #d1d5db",
+    borderRadius: "14px",
     background: "#fff",
-    border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "20px",
-    boxShadow: "0 4px 14px rgba(0,0,0,0.04)",
+    cursor: "pointer",
+    fontWeight: "600",
+    color: "#111827",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)",
   },
-  headerRow: {
+  heroCard: {
+    background: "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+    border: "1px solid #e5e7eb",
+    borderRadius: "24px",
+    padding: "28px",
+    boxShadow: "0 10px 30px rgba(15,23,42,0.05)",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: "12px",
-    marginBottom: "16px",
+    gap: "20px",
     flexWrap: "wrap",
   },
-  headerLeft: {
+  heroLeft: {
     display: "grid",
     gap: "10px",
+  },
+  heroRight: {
+    display: "flex",
+    alignItems: "flex-start",
+  },
+  orderPill: {
+    background: "#eef4ff",
+    color: "#1d4ed8",
+    border: "1px solid #c7d7fe",
+    borderRadius: "999px",
+    padding: "8px 14px",
+    fontSize: "13px",
+    fontWeight: "800",
+    width: "fit-content",
+    letterSpacing: "0.02em",
+  },
+  customerName: {
+    fontSize: "30px",
+    lineHeight: 1.1,
+    fontWeight: "800",
+    color: "#0f172a",
+    letterSpacing: "-0.03em",
+  },
+  heroMeta: {
+    display: "flex",
+    gap: "8px",
+    flexWrap: "wrap",
+    fontSize: "15px",
+    color: "#6b7280",
+  },
+  contentGrid: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 1.5fr) minmax(340px, 0.88fr)",
+    gap: "20px",
+    alignItems: "start",
+  },
+  detailCard: {
+    background: "#ffffff",
+    border: "1px solid #e5e7eb",
+    borderRadius: "22px",
+    padding: "24px 24px 14px",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+  },
+  actionCard: {
+    background: "#ffffff",
+    border: "1px solid #e5e7eb",
+    borderRadius: "22px",
+    padding: "24px",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.04)",
+    position: "sticky",
+    top: "20px",
+  },
+  cardHeader: {
+    marginBottom: "18px",
   },
   cardTitle: {
-    margin: 0,
-    fontSize: "20px",
+    fontSize: "21px",
+    fontWeight: "800",
+    color: "#111827",
+    letterSpacing: "-0.02em",
   },
-  orderNoBadge: {
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    border: "1px solid #bfdbfe",
-    borderRadius: "999px",
-    padding: "6px 12px",
-    fontSize: "13px",
-    fontWeight: "700",
-    width: "fit-content",
-  },
-  infoGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: "14px",
-  },
-  infoItem: {
-    padding: "14px",
-    borderRadius: "12px",
-    background: "#f9fafb",
-    border: "1px solid #e5e7eb",
-  },
-  infoLabel: {
+  cardSub: {
+    marginTop: "5px",
     fontSize: "13px",
     color: "#6b7280",
-    marginBottom: "8px",
   },
-  infoValue: {
-    fontSize: "16px",
+  detailList: {
+    display: "grid",
+    gap: "2px",
+  },
+  detailRow: {
+    display: "grid",
+    gridTemplateColumns: "160px 1fr",
+    gap: "20px",
+    padding: "16px 0",
+    borderBottom: "1px solid #f1f5f9",
+    alignItems: "start",
+  },
+  detailLabel: {
+    fontSize: "13px",
+    color: "#6b7280",
     fontWeight: "600",
+  },
+  detailValue: {
+    fontSize: "17px",
+    fontWeight: "700",
+    color: "#111827",
+    wordBreak: "break-word",
+  },
+  actionBlock: {
+    display: "grid",
+    gap: "12px",
+  },
+  blockTitle: {
+    fontSize: "14px",
+    fontWeight: "800",
     color: "#111827",
   },
-  assignRow: {
-    display: "flex",
-    gap: "12px",
-    flexWrap: "wrap",
-  },
-  buttonRow: {
-    display: "flex",
-    gap: "10px",
-    flexWrap: "wrap",
+  softDivider: {
+    height: "1px",
+    background: "#eef2f7",
+    margin: "18px 0",
   },
   input: {
-    padding: "12px 14px",
-    borderRadius: "12px",
+    padding: "13px 14px",
+    borderRadius: "14px",
     border: "1px solid #d1d5db",
     background: "#fff",
-    minWidth: "220px",
+    fontSize: "14px",
+    outline: "none",
   },
   primaryBtn: {
-    padding: "12px 14px",
+    padding: "13px 16px",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#2563eb",
     color: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
-  },
-  secondaryBtn: {
-    padding: "12px 14px",
-    border: "1px solid #d1d5db",
-    borderRadius: "12px",
-    background: "#fff",
-    cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: "800",
+    fontSize: "15px",
+    boxShadow: "0 6px 14px rgba(37,99,235,0.18)",
   },
   grayBtn: {
-    padding: "12px 14px",
+    padding: "13px 16px",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#6b7280",
     color: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: "800",
+    fontSize: "15px",
   },
   blueBtn: {
-    padding: "12px 14px",
+    padding: "13px 16px",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#2563eb",
     color: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: "800",
+    fontSize: "15px",
   },
   greenBtn: {
-    padding: "12px 14px",
+    padding: "13px 16px",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#16a34a",
     color: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: "800",
+    fontSize: "15px",
+  },
+  dangerInline: {
+    background: "#fff",
+    border: "1px solid #fecaca",
+    borderRadius: "18px",
+    padding: "18px 22px",
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "14px",
+    flexWrap: "wrap",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.03)",
+  },
+  dangerTitle: {
+    fontSize: "17px",
+    fontWeight: "800",
+    color: "#991b1b",
+  },
+  dangerText: {
+    marginTop: "4px",
+    fontSize: "13px",
+    color: "#7f1d1d",
   },
   deleteBtn: {
-    padding: "12px 14px",
+    padding: "12px 18px",
     border: "none",
-    borderRadius: "12px",
+    borderRadius: "14px",
     background: "#dc2626",
     color: "#fff",
     cursor: "pointer",
-    fontWeight: "600",
+    fontWeight: "800",
+    fontSize: "15px",
   },
   loadingCard: {
     background: "#fff",
-    borderRadius: "16px",
+    borderRadius: "18px",
     padding: "24px",
     border: "1px solid #e5e7eb",
   },
   emptyCard: {
     background: "#fff",
-    borderRadius: "16px",
+    borderRadius: "18px",
     padding: "24px",
     border: "1px solid #e5e7eb",
     color: "#6b7280",

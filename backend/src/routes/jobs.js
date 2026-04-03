@@ -48,14 +48,10 @@ async function generateOrderNo(companyId) {
 router.get("/", authMiddleware, async (req, res) => {
   try {
     const { status, date } = req.query;
-
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const where = {
@@ -85,16 +81,42 @@ router.get("/", authMiddleware, async (req, res) => {
       orderBy: [{ serviceDate: "asc" }, { createdAt: "desc" }],
     });
 
-    return res.json({
-      ok: true,
-      jobs,
-    });
+    return res.json({ ok: true, jobs });
   } catch (error) {
     console.error("Get jobs error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
+    return res.status(500).json({ ok: false, error: "Server error" });
+  }
+});
+
+// GET /jobs/:id
+router.get("/:id", authMiddleware, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const company = await getCompanyByUser(req.user);
+
+    if (!company) {
+      return res.status(404).json({ ok: false, error: "Company not found" });
+    }
+
+    const job = await prisma.job.findFirst({
+      where: {
+        id,
+        companyId: company.id,
+      },
+      include: {
+        customer: true,
+        cleaner: true,
+      },
     });
+
+    if (!job) {
+      return res.status(404).json({ ok: false, error: "Job not found" });
+    }
+
+    return res.json({ ok: true, job });
+  } catch (error) {
+    console.error("Get job detail error:", error);
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -105,8 +127,13 @@ router.post("/", authMiddleware, async (req, res) => {
       customerId,
       cleanerId,
       serviceDate,
+      endDate,
       serviceTime,
+      endTime,
       serviceType,
+      title,
+      instructions,
+      anytime,
       address,
       notes,
       source,
@@ -125,10 +152,7 @@ router.post("/", authMiddleware, async (req, res) => {
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const customer = await prisma.customer.findFirst({
@@ -139,10 +163,7 @@ router.post("/", authMiddleware, async (req, res) => {
     });
 
     if (!customer) {
-      return res.status(404).json({
-        ok: false,
-        error: "Customer not found",
-      });
+      return res.status(404).json({ ok: false, error: "Customer not found" });
     }
 
     let finalCleanerId = null;
@@ -158,10 +179,7 @@ router.post("/", authMiddleware, async (req, res) => {
       });
 
       if (!cleaner) {
-        return res.status(404).json({
-          ok: false,
-          error: "Cleaner not found",
-        });
+        return res.status(404).json({ ok: false, error: "Cleaner not found" });
       }
 
       finalCleanerId = Number(cleanerId);
@@ -178,10 +196,15 @@ router.post("/", authMiddleware, async (req, res) => {
         customerId: Number(customerId),
         cleanerId: finalCleanerId,
         serviceDate: new Date(serviceDate),
-        serviceTime,
-        serviceType,
+        endDate: endDate ? new Date(endDate) : null,
+        serviceTime: serviceTime || null,
+        endTime: endTime || null,
+        serviceType: serviceType || null,
+        title: title || serviceType || null,
+        instructions: instructions || null,
+        anytime: !!anytime,
         address: address || customer.address || "",
-        notes,
+        notes: notes || null,
         status: finalStatus,
         orderNo,
         source: source || "admin",
@@ -195,16 +218,10 @@ router.post("/", authMiddleware, async (req, res) => {
       },
     });
 
-    return res.status(201).json({
-      ok: true,
-      job,
-    });
+    return res.status(201).json({ ok: true, job });
   } catch (error) {
     console.error("Create job error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-    });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -216,8 +233,13 @@ router.put("/:id", authMiddleware, async (req, res) => {
       customerId,
       cleanerId,
       serviceDate,
+      endDate,
       serviceTime,
+      endTime,
       serviceType,
+      title,
+      instructions,
+      anytime,
       address,
       notes,
       status,
@@ -230,10 +252,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const existing = await prisma.job.findFirst({
@@ -244,10 +263,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
     });
 
     if (!existing) {
-      return res.status(404).json({
-        ok: false,
-        error: "Job not found",
-      });
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
     if (customerId) {
@@ -259,10 +275,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       });
 
       if (!customer) {
-        return res.status(404).json({
-          ok: false,
-          error: "Customer not found",
-        });
+        return res.status(404).json({ ok: false, error: "Customer not found" });
       }
     }
 
@@ -275,10 +288,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       });
 
       if (!cleaner) {
-        return res.status(404).json({
-          ok: false,
-          error: "Cleaner not found",
-        });
+        return res.status(404).json({ ok: false, error: "Cleaner not found" });
       }
     }
 
@@ -294,24 +304,28 @@ router.put("/:id", authMiddleware, async (req, res) => {
       customerId: customerId ? Number(customerId) : undefined,
       cleanerId: typeof cleanerId !== "undefined" ? nextCleanerId : undefined,
       serviceDate: serviceDate ? new Date(serviceDate) : undefined,
-      serviceTime,
-      serviceType,
-      address,
-      notes,
-      status,
-      source,
-      externalRef,
-      createdBy,
-      workspaceId: typeof workspaceId !== "undefined"
-        ? (workspaceId ? Number(workspaceId) : null)
-        : undefined,
+      endDate: typeof endDate !== "undefined" ? (endDate ? new Date(endDate) : null) : undefined,
+      serviceTime: typeof serviceTime !== "undefined" ? serviceTime : undefined,
+      endTime: typeof endTime !== "undefined" ? endTime : undefined,
+      serviceType: typeof serviceType !== "undefined" ? serviceType : undefined,
+      title: typeof title !== "undefined" ? title : undefined,
+      instructions: typeof instructions !== "undefined" ? instructions : undefined,
+      anytime: typeof anytime !== "undefined" ? !!anytime : undefined,
+      address: typeof address !== "undefined" ? address : undefined,
+      notes: typeof notes !== "undefined" ? notes : undefined,
+      status: typeof status !== "undefined" ? status : undefined,
+      source: typeof source !== "undefined" ? source : undefined,
+      externalRef: typeof externalRef !== "undefined" ? externalRef : undefined,
+      createdBy: typeof createdBy !== "undefined" ? createdBy : undefined,
+      workspaceId:
+        typeof workspaceId !== "undefined"
+          ? workspaceId
+            ? Number(workspaceId)
+            : null
+          : undefined,
     };
 
-    if (
-      nextCleanerId &&
-      nextStatus === "assigned" &&
-      !existing.assignedAt
-    ) {
+    if (nextCleanerId && nextStatus === "assigned" && !existing.assignedAt) {
       updateData.assignedAt = new Date();
     }
 
@@ -332,16 +346,10 @@ router.put("/:id", authMiddleware, async (req, res) => {
       },
     });
 
-    return res.json({
-      ok: true,
-      job,
-    });
+    return res.json({ ok: true, job });
   } catch (error) {
     console.error("Update job error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-    });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -352,19 +360,13 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
     const { cleanerId } = req.body;
 
     if (!cleanerId) {
-      return res.status(400).json({
-        ok: false,
-        error: "cleanerId is required",
-      });
+      return res.status(400).json({ ok: false, error: "cleanerId is required" });
     }
 
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const existing = await prisma.job.findFirst({
@@ -375,10 +377,7 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
     });
 
     if (!existing) {
-      return res.status(404).json({
-        ok: false,
-        error: "Job not found",
-      });
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
     const cleaner = await prisma.cleaner.findFirst({
@@ -389,10 +388,7 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
     });
 
     if (!cleaner) {
-      return res.status(404).json({
-        ok: false,
-        error: "Cleaner not found",
-      });
+      return res.status(404).json({ ok: false, error: "Cleaner not found" });
     }
 
     const job = await prisma.job.update({
@@ -408,16 +404,10 @@ router.put("/:id/assign", authMiddleware, async (req, res) => {
       },
     });
 
-    return res.json({
-      ok: true,
-      job,
-    });
+    return res.json({ ok: true, job });
   } catch (error) {
     console.error("Assign job error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-    });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -427,22 +417,16 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
     const id = Number(req.params.id);
     const { status } = req.body;
 
-    const allowed = ["pending", "assigned", "completed", "cancelled"];
+    const allowed = ["pending", "assigned", "completed", "cancelled", "in_progress"];
 
     if (!allowed.includes(status)) {
-      return res.status(400).json({
-        ok: false,
-        error: "Invalid status",
-      });
+      return res.status(400).json({ ok: false, error: "Invalid status" });
     }
 
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const existing = await prisma.job.findFirst({
@@ -453,10 +437,7 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
     });
 
     if (!existing) {
-      return res.status(404).json({
-        ok: false,
-        error: "Job not found",
-      });
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
     const data = { status };
@@ -482,16 +463,10 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
       },
     });
 
-    return res.json({
-      ok: true,
-      job,
-    });
+    return res.json({ ok: true, job });
   } catch (error) {
     console.error("Update job status error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-    });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -499,14 +474,10 @@ router.put("/:id/status", authMiddleware, async (req, res) => {
 router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     const id = Number(req.params.id);
-
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const existing = await prisma.job.findFirst({
@@ -517,10 +488,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     });
 
     if (!existing) {
-      return res.status(404).json({
-        ok: false,
-        error: "Job not found",
-      });
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
     await prisma.job.delete({
@@ -533,10 +501,7 @@ router.delete("/:id", authMiddleware, async (req, res) => {
     });
   } catch (error) {
     console.error("Delete job error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-    });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
@@ -547,19 +512,13 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
     const { cleanerId } = req.body;
 
     if (!cleanerId) {
-      return res.status(400).json({
-        ok: false,
-        error: "Cleaner ID is required",
-      });
+      return res.status(400).json({ ok: false, error: "Cleaner ID is required" });
     }
 
     const company = await getCompanyByUser(req.user);
 
     if (!company) {
-      return res.status(404).json({
-        ok: false,
-        error: "Company not found",
-      });
+      return res.status(404).json({ ok: false, error: "Company not found" });
     }
 
     const existingJob = await prisma.job.findFirst({
@@ -570,10 +529,7 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
     });
 
     if (!existingJob) {
-      return res.status(404).json({
-        ok: false,
-        error: "Job not found",
-      });
+      return res.status(404).json({ ok: false, error: "Job not found" });
     }
 
     const cleaner = await prisma.cleaner.findFirst({
@@ -584,10 +540,7 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
     });
 
     if (!cleaner) {
-      return res.status(404).json({
-        ok: false,
-        error: "Cleaner not found",
-      });
+      return res.status(404).json({ ok: false, error: "Cleaner not found" });
     }
 
     const updatedJob = await prisma.job.update({
@@ -603,16 +556,10 @@ router.put("/:id/reassign", authMiddleware, async (req, res) => {
       },
     });
 
-    return res.json({
-      ok: true,
-      job: updatedJob,
-    });
+    return res.json({ ok: true, job: updatedJob });
   } catch (error) {
     console.error("Reassign job error:", error);
-    return res.status(500).json({
-      ok: false,
-      error: "Server error",
-    });
+    return res.status(500).json({ ok: false, error: "Server error" });
   }
 });
 
